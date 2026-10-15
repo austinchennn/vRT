@@ -7,3 +7,5 @@ export { tool, validateToolArgs } from './tool.js';
 export type { JsonSchema, StandardResult, StandardSchemaV1, Tool, ToolContext, ToolFailure, ToolResult, ToolRisk } from './tool.js';
 export { defineAgent } from './agent.js';
 export type { AgentDefinition, BeforeToolCall, Hooks, ToolCallInfo, Turn, TurnMetrics, TurnState } from './agent.js';
+export { AgentSession, serverToolSpecs, startSession, toModelOutput } from './session.js';
+export type { AgentEvent, AgentEventOf, AgentEventType, Clock, InterruptReason, StartSessionOptions, TranscriptItem } from './session.js';
