@@ -1,0 +1,78 @@
+import { PROTOCOL_VERSION, TRANSIENT_TYPES } from './messages.js';
+
+type Envelope = { v: typeof PROTOCOL_VERSION; seq: number };
+type Message = Envelope & { type: string };
+/** A message before `Outbox.stamp` assigns its envelope. */
+export type Unsequenced<M extends Message> = M extends unknown ? Omit<M, 'v' | 'seq'> : never;
+
+/**
+ * Outgoing side: assigns `seq`, keeps unacknowledged messages and returns them
+ * for resend after a reconnect. Transient messages (ack, ping, pong) get `seq: 0`
+ * and are not kept.
+ */
+export class Outbox<M extends Message> {
+  #seq = 0;
+  #unacked: M[] = [];
+  readonly #limit: number;
+  /** Highest seq dropped unacknowledged because of `limit`; peers behind it cannot resume. */
+  #droppedUpTo = 0;
+
+  constructor(limit = 1024) {
+    this.#limit = limit;
+  }
+
+  get lastSeq(): number {
+    return this.#seq;
+  }
+
+  get pending(): number {
+    return this.#unacked.length;
+  }
+
+  stamp(message: Unsequenced<M>): M {
+    const transient = TRANSIENT_TYPES.has((message as { type: string }).type);
+    const full = { v: PROTOCOL_VERSION, seq: transient ? 0 : ++this.#seq, ...message } as unknown as M;
+    if (!transient) {
+      this.#unacked.push(full);
+      if (this.#unacked.length > this.#limit) this.#droppedUpTo = this.#unacked.shift()!.seq;
+    }
+    return full;
+  }
+
+  /** The peer has everything up to and including `upTo`. */
+  ack(upTo: number): void {
+    let drop = 0;
+    while (drop < this.#unacked.length && this.#unacked[drop]!.seq <= upTo) drop++;
+    if (drop > 0) this.#unacked.splice(0, drop);
+  }
+
+  /** Messages after `lastSeen` for resend, or undefined when some of them were already dropped. */
+  resendFrom(lastSeen: number): M[] | undefined {
+    if (lastSeen < this.#droppedUpTo) return undefined;
+    return this.#unacked.filter((message) => message.seq > lastSeen);
+  }
+}
+
+/**
+ * Incoming side: drops duplicates and tracks the resume point (`lastSeq`),
+ * which is what a reconnecting peer reports as `resumeFrom`.
+ */
+export class Inbox {
+  #lastSeq: number;
+
+  constructor(lastSeq = 0) {
+    this.#lastSeq = lastSeq;
+  }
+
+  get lastSeq(): number {
+    return this.#lastSeq;
+  }
+
+  /** True when the message is new and should be handled. */
+  accept(message: { type: string; seq: number }): boolean {
+    if (TRANSIENT_TYPES.has(message.type)) return true;
+    if (message.seq <= this.#lastSeq) return false;
+    this.#lastSeq = message.seq;
+    return true;
+  }
+}
