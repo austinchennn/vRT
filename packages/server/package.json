@@ -7,12 +7,12 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "source": "./src/index.ts",
+      "@vrealtime/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./node": {
-      "source": "./src/node/index.ts",
+      "@vrealtime/source": "./src/node/index.ts",
       "types": "./dist/node/index.d.ts",
       "default": "./dist/node/index.js"
     }

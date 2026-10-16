@@ -3,7 +3,7 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "customConditions": ["source"],
+    "customConditions": ["@vrealtime/source"],
     "lib": ["ES2022", "DOM"],
     "types": [],
     "strict": true,
