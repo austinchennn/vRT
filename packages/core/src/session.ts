@@ -52,6 +52,8 @@ export interface TranscriptItem {
 export interface StartSessionOptions {
   /** Tools declared by the connecting app; offered to the model when `clientTools` is `'accept'`. */
   clientTools?: readonly ToolSpec[];
+  /** Extra session config, e.g. the audio formats an edge negotiated. */
+  config?: Partial<SessionConfig>;
   signal?: AbortSignal;
   clock?: Clock;
 }
@@ -671,6 +673,7 @@ export async function startSession(agent: AgentDefinition, options: StartSession
     tools: [...serverToolSpecs(agent), ...acceptedClientTools(agent, options.clientTools)],
     ...(agent.voice !== undefined ? { voice: agent.voice } : {}),
     ...(agent.turnDetection !== undefined ? { turnDetection: agent.turnDetection } : {}),
+    ...options.config,
   };
   const model = await agent.model.connect(config, options.signal ? { signal: options.signal } : undefined);
   return new AgentSession(agent, model, options);

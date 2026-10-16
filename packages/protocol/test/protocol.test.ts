@@ -18,7 +18,7 @@ const env = { v: 1 as const, seq: 7 };
 const pcm = { encoding: 'pcm16' as const, sampleRate: 24000 };
 
 const clientMessages: ClientMessage[] = [
-  { ...env, type: 'hello', tools: [{ name: 'paint', description: 'd', parameters: { type: 'object' } }], input: pcm, output: { encoding: 'opus' }, resumeFrom: 3, context: { doc: 1 } },
+  { ...env, type: 'hello', tools: [{ name: 'paint', description: 'd', parameters: { type: 'object' } }], input: pcm, output: { encoding: 'opus' }, sessionId: 's1', resumeFrom: 3, context: { doc: 1 } },
   { ...env, type: 'hello', tools: [] },
   { ...env, type: 'text', text: 'hi' },
   { ...env, type: 'interrupt', epoch: 4, reason: 'keyboard' },
@@ -32,6 +32,7 @@ const clientMessages: ClientMessage[] = [
 
 const serverMessages: ServerMessage[] = [
   { ...env, type: 'ready', sessionId: 's', input: pcm, output: pcm, resumedFrom: 2 },
+  { ...env, type: 'audio.start', itemId: 'a1', responseId: 'r1', epoch: 1 },
   { ...env, type: 'turn.state', turnId: 't1', epoch: 1, state: 'acting' },
   { ...env, type: 'transcript', role: 'agent', itemId: 'a1', text: 'hello', final: false },
   { ...env, type: 'text', responseId: 'r1', delta: 'x' },
@@ -130,6 +131,7 @@ describe('sequencing', () => {
     const out = new Outbox<ServerMessage>();
     const a = out.stamp({ type: 'interrupted', epoch: 1 });
     const ping = out.stamp({ type: 'pong' });
+    expect(out.stamp({ type: 'audio.start', itemId: 'a', responseId: 'r', epoch: 1 }).seq).toBe(0);
     const b = out.stamp({ type: 'text', responseId: 'r', delta: 'x' });
     expect([a.seq, ping.seq, b.seq]).toEqual([1, 0, 2]);
     expect(a.v).toBe(1);

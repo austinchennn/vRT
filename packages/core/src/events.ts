@@ -13,7 +13,9 @@ export type RealtimeEvent =
   | { type: 'tool.call.delta'; responseId: string; callId: string; name: string; argumentsDelta: string }
   | { type: 'tool.call'; responseId: string; callId: string; name: string; arguments: unknown }
   | { type: 'response.end'; responseId: string; status: ResponseStatus; usage?: Usage }
-  | { type: 'error'; error: Error; recoverable: boolean };
+  | { type: 'error'; error: Error; recoverable: boolean }
+  /** Provider-specific event outside the normalized set (e.g. `conversation.context.summarized`). */
+  | { type: 'extension'; name: string; data: unknown };
 
 export type ResponseStatus = 'done' | 'cancelled' | 'interrupted' | 'failed';
 export type EventType = RealtimeEvent['type'];

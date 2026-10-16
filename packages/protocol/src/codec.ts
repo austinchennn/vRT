@@ -24,7 +24,7 @@ const failureCode = oneOf('INTERRUPTED', 'REJECTED', 'INVALID', 'TIMEOUT', 'FAIL
 const turnState = oneOf('idle', 'listening', 'thinking', 'speaking', 'acting');
 
 const CLIENT: Record<string, Shape> = {
-  hello: { tools: arrayOf(toolSpec), input: opt(format), output: opt(format), resumeFrom: opt(uint), context: any },
+  hello: { tools: arrayOf(toolSpec), input: opt(format), output: opt(format), sessionId: opt(str), resumeFrom: opt(uint), context: any },
   text: { text: str },
   interrupt: { epoch: uint, reason: oneOf('speech', 'user', 'keyboard') },
   playback: { itemId: str, playedMs: num },
@@ -36,6 +36,7 @@ const CLIENT: Record<string, Shape> = {
 
 const SERVER: Record<string, Shape> = {
   ready: { sessionId: str, input: format, output: format, resumedFrom: opt(uint) },
+  'audio.start': { itemId: str, responseId: str, epoch: uint },
   'turn.state': { turnId: str, epoch: uint, state: turnState },
   transcript: { role: oneOf('user', 'agent'), itemId: str, text: str, final: bool },
   text: { responseId: str, delta: str },

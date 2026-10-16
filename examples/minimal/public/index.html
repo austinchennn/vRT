@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>vRealTime demo</title>
+<style>
+  :root {
+    --accent: #2563eb;
+    --bg: #ffffff; --fg: #111827; --muted: #6b7280; --line: #e5e7eb; --error: #b91c1c;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0b0f17; --fg: #e5e7eb; --muted: #9ca3af; --line: #1f2937; --error: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 24px 16px; }
+  h1 { margin: 0; font-size: 22px; }
+  h1 span { color: var(--accent); transition: color .3s; }
+  #status { color: var(--muted); margin: 4px 0 16px; font-size: 14px; }
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; border-radius: 8px; padding: 8px 16px; cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: #fff; transition: background .3s, border-color .3s; }
+  button.ghost { background: transparent; color: var(--fg); border-color: var(--line); }
+  button:disabled { opacity: .45; cursor: default; }
+  #state { margin-left: auto; font-size: 13px; padding: 2px 10px; border-radius: 99px; border: 1px solid var(--accent); color: var(--accent); }
+  form { display: flex; gap: 8px; margin-top: 12px; }
+  input { flex: 1; min-width: 0; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; }
+  ol { list-style: none; padding: 0; margin: 20px 0 0; border-top: 1px solid var(--line); }
+  li { padding: 6px 0; }
+  li.user { font-weight: 600; }
+  li.user::before { content: 'You  '; color: var(--muted); font-weight: 400; }
+  li.agent::before { content: 'Agent  '; color: var(--accent); }
+  li.note, li.tool { color: var(--muted); font-size: 14px; }
+  li.tool { font-family: ui-monospace, monospace; }
+  li.error { color: var(--error); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>vRealTime <span>demo</span></h1>
+  <p id="status">Press Talk, or type below. Ask it to change the color.</p>
+  <div class="bar">
+    <button id="talk">Talk</button>
+    <button id="stop" class="ghost" disabled>Interrupt (Esc)</button>
+    <span id="state">idle</span>
+  </div>
+  <form id="form"><input id="text" placeholder="Try: make it teal" autocomplete="off"><button>Send</button></form>
+  <ol id="log"></ol>
+</main>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

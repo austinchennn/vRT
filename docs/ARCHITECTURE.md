@@ -163,8 +163,8 @@ const getWeather = tool({
 ### 5.1 线协议 `@vrealtime/protocol`（v1）
 
 - **二进制帧**放音频：1 字节类型 + 4 字节序号 + 负载，不做 base64。
-- **JSON 帧**放控制：`hello`（协议版本、客户端工具、音频格式、恢复点）、`ready`、`turn.state`、`transcript`、`text`、`tool.call` / `tool.call.delta` / `tool.result`、`interrupt`、`playback`（已播放 ms）、`ack`、`ping` / `pong`、`error`。
-- 每条消息带 `seq` 和 `epoch`；断线重连时从 `lastSeq` 恢复。
+- **JSON 帧**放控制：`hello`（协议版本、客户端工具、音频格式、`sessionId` + 恢复点）、`ready`、`audio.start`（之后的二进制输出帧属于哪个 item，客户端据此按 item 上报已播放 ms）、`turn.state`、`transcript`、`text`、`tool.call` / `tool.call.delta` / `tool.result`、`interrupt`、`playback`（已播放 ms）、`ack`、`ping` / `pong`、`error`。
+- 每条消息带 `seq`，与轮次相关的消息带 `epoch`；断线重连时客户端带 `sessionId` 和 `lastSeq` 恢复，双方补发对方没收到的消息。`hello`、`ready`、`audio.start`、`ack`、`ping`、`pong` 只对当前连接有效，`seq` 为 0，不补发。
 
 类型定义见 [`packages/protocol/src`](../packages/protocol/src)。
 
