@@ -1,5 +1,5 @@
 import { defineAgent, tool, type AgentDefinition, type Tool } from '@vrealtime/core';
-import { PROTOCOL_VERSION, TRANSIENT_TYPES, decodeAudioFrame, decodeServerMessage, encodeAudioFrame, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
+import { PROTOCOL_VERSION, TOOL_STREAM_V1, TRANSIENT_TYPES, decodeAudioFrame, decodeServerMessage, encodeAudioFrame, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
 import { fakeModel, type FakeModel } from '@vrealtime/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Hub, attach, type AttachOptions, type WebSocketLike } from '../src/index.js';
@@ -119,6 +119,54 @@ describe('handshake', () => {
     listeners['message']!({ data: JSON.stringify({ v: 1, seq: 0, type: 'hello', tools: [] }) });
     await flush();
     expect(socket.ofType('ready')).toHaveLength(1);
+  });
+});
+
+describe('tool streams (tool-stream-v1)', () => {
+  const streamOf = (socket: FakeSocket) => socket.ofType('tool.stream').map((m) => [m.callId, m.phase]);
+
+  async function streamed(model: FakeModel, client: ReturnType<ReturnType<typeof setup>['connect']>, capabilities: string[]) {
+    const { fake, ready: r } = await ready(model, client, { tools: [paint], capabilities });
+    fake.emit({ type: 'input.speech.start', atMs: 0 });
+    fake.emit({ type: 'response.start', responseId: 'r1' });
+    fake.emit({ type: 'tool.call.delta', responseId: 'r1', callId: 'c1', name: 'paint', argumentsDelta: '{"color":"red"}' });
+    fake.emit({ type: 'tool.call', responseId: 'r1', callId: 'c1', name: 'paint', arguments: { color: 'red' } });
+    await flush();
+    const call = client.socket.ofType('tool.call')[0]!;
+    client.send({ type: 'tool.result', callId: 'c1', epoch: call.epoch, ok: true, output: 'painted' });
+    return { fake, ready: r };
+  }
+
+  it('reports each call as tool.stream, from start to its terminal phase, and never as tool.call.delta', async () => {
+    const { model, connect } = setup();
+    const client = connect();
+    const { ready: r } = await streamed(model, client, [TOOL_STREAM_V1]);
+    expect(r.capabilities).toEqual([TOOL_STREAM_V1]);
+    expect(streamOf(client.socket)).toEqual([['c1', 'start'], ['c1', 'arguments-delta'], ['c1', 'arguments-complete'], ['c1', 'settled']]);
+    expect(client.socket.ofType('tool.stream')[1]).toMatchObject({ delta: '{"color":"red"}', turnId: expect.any(String) });
+    expect(client.socket.ofType('tool.call.delta')).toEqual([]);
+  });
+
+  it('keeps the 1.0 preview for a client that does not offer it', async () => {
+    const { model, connect } = setup();
+    const client = connect();
+    await streamed(model, client, []);
+    expect(client.socket.ofType('tool.stream')).toEqual([]);
+    expect(client.socket.ofType('tool.call.delta')).toMatchObject([{ callId: 'c1', preview: { argumentsDelta: '{"color":"red"}' } }]);
+  });
+
+  it("reports a server tool's progress and outcome, but never its output", async () => {
+    const secret = tool({ description: '', parameters: {}, run: (_args, context) => { context.emit({ step: 1 }); return { token: 'do-not-leak' }; } }) as Tool<never, unknown>;
+    const { model, connect } = setup({ tools: { lookup: secret } });
+    const client = connect();
+    const { fake } = await ready(model, client, { capabilities: [TOOL_STREAM_V1] });
+    fake.emit({ type: 'input.speech.start', atMs: 0 });
+    fake.emit({ type: 'response.start', responseId: 'r1' });
+    fake.emit({ type: 'tool.call', responseId: 'r1', callId: 's1', name: 'lookup', arguments: {} });
+    await flush();
+    expect(streamOf(client.socket)).toEqual([['s1', 'start'], ['s1', 'arguments-complete'], ['s1', 'progress'], ['s1', 'settled']]);
+    expect(client.socket.ofType('tool.stream').at(-1)).toEqual(expect.objectContaining({ phase: 'settled', ok: true }));
+    expect(JSON.stringify(client.socket.messages())).not.toContain('do-not-leak');
   });
 });
 
