@@ -21,6 +21,8 @@
     "test:e2e": "vitest run examples/minimal",
     "pack": "node scripts/pack.mjs",
     "test:consumer": "node scripts/consumer-smoke.mjs",
+    "publish:dry-run": "node scripts/publish.mjs --dry-run",
+    "version:set": "node scripts/set-version.mjs",
     "test:workers": "npm run build && vitest run examples/workers"
   },
   "devDependencies": {

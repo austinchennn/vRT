@@ -1,0 +1,52 @@
+name: Release
+
+# Publishes every @vrealtime package to npm when a version tag (v0.1.0) is pushed.
+# Run it by hand (Actions → Release → Run workflow) for a dry run. See RELEASING.md.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Check and pack everything, but publish nothing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write # npm provenance: links each published version to this workflow run
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Add required reviewers to this environment (Settings → Environments) to gate releases.
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run check:spec
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:e2e
+      # Builds every package and packs the tarballs that are published below.
+      - run: npm run pack
+      - run: npm run check:budgets
+      - run: npm run test:consumer
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
+        run: |
+          args=(--provenance)
+          if [ "$GITHUB_REF_TYPE" = tag ]; then args+=(--expect-version "${GITHUB_REF_NAME#v}"); fi
+          if [ "$DRY_RUN" = true ]; then args+=(--dry-run); fi
+          node scripts/publish.mjs "${args[@]}"
