@@ -1,0 +1,35 @@
+#!/usr/bin/env node
+import { parseArgs } from 'node:util';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { run } from './runner.js';
+
+try {
+  const split = process.argv.indexOf('--');
+  const argv = split < 0 ? process.argv.slice(2) : process.argv.slice(2, split);
+  const driverArgs = split < 0 ? [] : process.argv.slice(split + 1);
+  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
+    exec: { type: 'string' }, url: { type: 'string' }, json: { type: 'boolean' },
+    'timeout-ms': { type: 'string', default: '5000' },
+  } });
+  const mode = positionals[0];
+  const timeoutMs = Number(values['timeout-ms']);
+  if (positionals.length !== 1 || (mode !== 'client' && mode !== 'server') || !Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60000) {
+    throw new Error('Usage: vrt-conformance client|server [--exec PROGRAM | --url WS_URL] [--json] [--timeout-ms 5000] -- DRIVER_ARGS (timeout 1..60000 ms)');
+  }
+  if (!values.exec && (mode === 'client' || !values.url)) throw new Error('Missing --exec or --url');
+  if (values.exec && values.url) throw new Error('Choose --exec or --url, not both');
+  const report = await run({ mode, args: driverArgs, timeoutMs,
+    assets: join(dirname(fileURLToPath(import.meta.url)), '../assets'),
+    ...(values.exec ? { command: values.exec } : {}), ...(values.url ? { url: values.url } : {}),
+  });
+  if (values.json) console.log(JSON.stringify(report, null, 2));
+  else {
+    console.log(`${report.profile}: protocol ${report.protocol}, ${report.mode}, capabilities ${JSON.stringify(report.capabilities)}`);
+    for (const result of report.cases) console.log(`${result.status.toUpperCase()} ${result.id} (${result.durationMs.toFixed(1)} ms) ${JSON.stringify(result.actual)}`);
+    console.log(`Full suite: ${report.fullSuite}. Not covered: ${report.remaining.join(', ')}`);
+  }
+  process.exitCode = report.cases.length > 0 && report.cases.every(c => c.status === 'pass') ? 0 : 1;
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 2;
+}

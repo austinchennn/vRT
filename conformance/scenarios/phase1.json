@@ -1,0 +1,18 @@
+[
+  {
+    "id": "client/handshake/baseline",
+    "expected": "Valid hello/ready, no negotiated capabilities or gated frames"
+  },
+  {
+    "id": "client/interrupt/stale-call",
+    "expected": "After local interrupt: no probe start/commit and exactly one logical INTERRUPTED result through close fence"
+  },
+  {
+    "id": "server/handshake/baseline",
+    "expected": "Valid hello without capabilities receives baseline ready"
+  },
+  {
+    "id": "server/handshake/version",
+    "expected": "Wrong major receives recoverable UNSUPPORTED_VERSION without opening a session; subsequent valid hello succeeds"
+  }
+]

@@ -1,0 +1,29 @@
+{
+  "name": "@vrealtime/conformance",
+  "version": "0.1.0",
+  "description": "Partial black-box vRT handshake and interrupt profile",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "vrt-conformance": "dist/node/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "driver-protocol.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "pack:local": "node pack.mjs"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ws": "^8.18.3"
+  }
+}
