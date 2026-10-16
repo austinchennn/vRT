@@ -22,7 +22,7 @@ serve(defineAgent({
 }), { port: 8790, publicDir: new URL('./public', import.meta.url) });
 ```
 
-> Status: M0 is implemented in this repo (core runtime, protocol, Boson adapter, server, browser client). Packages are not published to npm yet.
+> Status: M0 and M2 are implemented in this repo: core runtime, protocol, Boson / OpenAI / Gemini adapters, cascade (STT + any AI SDK model + TTS), VAD, Node / Workers server, browser client and React hooks. Packages are not published to npm yet.
 
 ## Quickstart
 
@@ -35,6 +35,20 @@ BOSON_API_KEY=your-key npm start -w examples/minimal
 ```
 
 Open http://localhost:8790 and press **Talk**, or type a message. Ask it to change the color: the `set_accent_color` tool runs in the page. Speak over the agent (or press Esc) to interrupt it; once interrupted, no further tool call from that turn is applied.
+
+The same agent runs on any of the four models; only the model changes ([examples/minimal/models.js](examples/minimal/models.js)):
+
+```bash
+MODEL=openai OPENAI_API_KEY=your-key npm start -w examples/minimal
+```
+
+```bash
+MODEL=gemini GEMINI_API_KEY=your-key npm start -w examples/minimal
+```
+
+```bash
+MODEL=cascade OPENAI_API_KEY=your-key npm start -w examples/minimal
+```
 
 No API key? `npm run start:fake -w examples/minimal` serves the same page with a scripted fake model.
 
@@ -49,6 +63,32 @@ const session = await connect('ws://localhost:8790', {
 });
 session.on('transcript', (e) => console.log(e.role, e.text));
 ```
+
+### React
+
+```tsx
+import { useRealtime } from '@vrealtime/react';
+
+function Assistant() {
+  const { status, state, transcript, connect, interrupt } = useRealtime('wss://your-server', {
+    tools: { set_accent_color: { parameters: { type: 'object' }, run: ({ color }) => setAccent(color) } },
+    audio: { input: 'mic', output: 'speaker' },
+  });
+  return <button onClick={status === 'connected' ? () => interrupt() : connect}>{status === 'connected' ? state : 'Talk'}</button>;
+}
+```
+
+### Cloudflare Workers and Durable Objects
+
+```ts
+import { upgrade } from '@vrealtime/server/workers';
+import { boson, fetchSocket } from '@vrealtime/boson';
+
+const agent = defineAgent({ model: boson({ apiKey: env.BOSON_API_KEY, socket: fetchSocket() }), instructions: '…', clientTools: 'accept' });
+export default { fetch: (request) => upgrade(agent, request) };
+```
+
+Workers' `WebSocket` cannot send auth headers, so Boson and OpenAI connect through `fetchSocket()`. Inside a Durable Object, call `upgrade()` from its `fetch()`; sessions live in the object's memory, so route reconnects to the same object to resume.
 
 ## Development
 
@@ -68,12 +108,12 @@ npm run build && npm run check:budgets && npm run bench
 | `@vrealtime/core` | Model interface, normalized events, agent runtime, tools, hooks |
 | `@vrealtime/protocol` | Wire protocol v1 between apps and a vRealTime server |
 | `@vrealtime/boson`, `@vrealtime/openai`, `@vrealtime/gemini` | Provider adapters (Boson Higgs Realtime, OpenAI Realtime, Gemini Live) |
-| `@vrealtime/server` | Attach any WebSocket; Node `serve()` with a debug page |
+| `@vrealtime/server` | Attach any WebSocket; Node `serve()` with a debug page; Workers / Durable Objects `upgrade()` |
 | `@vrealtime/client` | Browser SDK: app-side tools with the epoch gate, mic and playback |
 | `@vrealtime/testing` | Scripted fake model for tests |
 | `@vrealtime/cascade`, `@vrealtime/ai-sdk` | STT + any text LLM + TTS as one realtime model; AI SDK models as the LLM |
 | `@vrealtime/vad` | Energy VAD for turn detection where the model has none |
-| `@vrealtime/react` | Planned (M2): React hooks |
+| `@vrealtime/react` | `useRealtime()` hook |
 
 ## License
 
