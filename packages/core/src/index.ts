@@ -9,3 +9,4 @@ export { defineAgent } from './agent.js';
 export type { AgentDefinition, BeforeToolCall, Hooks, ToolCallInfo, Turn, TurnMetrics, TurnState } from './agent.js';
 export { AgentSession, serverToolSpecs, startSession, toModelOutput } from './session.js';
 export type { AgentEvent, AgentEventOf, AgentEventType, Clock, InterruptReason, StartSessionOptions, TranscriptItem } from './session.js';
+export type { Vad, VadFactory } from './vad.js';
