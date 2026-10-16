@@ -20,6 +20,8 @@ export interface ToolContext {
   callId: string;
   turnId: string;
   epoch: number;
+  /** Data the edge attached to the session, e.g. the authenticated principal. */
+  data: unknown;
   /** Streams a progress/preview payload to the client while the tool runs. */
   emit(preview: unknown): void;
 }

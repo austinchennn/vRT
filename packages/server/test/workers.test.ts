@@ -90,7 +90,7 @@ describe('upgrade() on Workers', () => {
     const secondMessages: ServerMessage[] = [];
     second.addEventListener('message', (e) => secondMessages.push(JSON.parse(e.data as string)));
     second.send(JSON.stringify({ v: 1, seq: 0, type: 'hello', tools: [], sessionId, resumeFrom: 0 }));
-    expect(secondMessages[0]).toMatchObject({ type: 'ready', sessionId, resumedFrom: 0 });
+    await vi.waitFor(() => expect(secondMessages[0]).toMatchObject({ type: 'ready', sessionId, resumedFrom: 0 }));
     expect(model.sessions).toHaveLength(1);
   });
 

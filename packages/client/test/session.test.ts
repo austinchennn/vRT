@@ -233,6 +233,40 @@ describe('audio output', () => {
   });
 });
 
+describe('authentication', () => {
+  it('sends the token in hello and calls a token function on every connect', async () => {
+    let n = 0;
+    const { socket } = await start({ auth: async () => `token-${++n}` });
+    await flush();
+    expect(socket.ofType('hello')[0]).toMatchObject({ auth: 'token-1' });
+    socket.drop(1006);
+    vi.advanceTimersByTime(250);
+    latest().open();
+    await flush();
+    expect(latest().ofType('hello')[0]).toMatchObject({ auth: 'token-2', sessionId: 'sess' });
+  });
+
+  it('gives up reconnecting on UNAUTHORIZED with a fixed token', async () => {
+    const { socket, events } = await start({ auth: 'static' });
+    socket.drop(1006);
+    vi.advanceTimersByTime(250);
+    latest().open();
+    await flush();
+    latest().server({ type: 'error', code: 'UNAUTHORIZED', message: 'expired', recoverable: false });
+    latest().drop(4401);
+    vi.advanceTimersByTime(10_000);
+    expect(events.at(-1)).toMatchObject({ type: 'closed', code: 4401 });
+    expect(FakeSocket.instances).toHaveLength(2);
+  });
+
+  it('fails the connection when the token function throws', async () => {
+    const pending = connect('ws://test', { WebSocket: FakeSocket as never, auth: () => { throw new Error('no session'); } });
+    latest().open();
+    await expect(pending).rejects.toThrow(/before ready/);
+    expect(latest().closedWith).toEqual([4401, 'auth failed']);
+  });
+});
+
 describe('reliability', () => {
   it('dedupes server messages and acks in batches', async () => {
     const { socket, events } = await start();

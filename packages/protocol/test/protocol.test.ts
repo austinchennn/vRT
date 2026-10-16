@@ -18,7 +18,7 @@ const env = { v: 1 as const, seq: 7 };
 const pcm = { encoding: 'pcm16' as const, sampleRate: 24000 };
 
 const clientMessages: ClientMessage[] = [
-  { ...env, type: 'hello', tools: [{ name: 'paint', description: 'd', parameters: { type: 'object' } }], input: pcm, output: { encoding: 'opus' }, sessionId: 's1', resumeFrom: 3, context: { doc: 1 } },
+  { ...env, type: 'hello', tools: [{ name: 'paint', description: 'd', parameters: { type: 'object' } }], input: pcm, output: { encoding: 'opus' }, sessionId: 's1', resumeFrom: 3, context: { doc: 1 }, auth: 'token-abc' },
   { ...env, type: 'hello', tools: [] },
   { ...env, type: 'text', text: 'hi' },
   { ...env, type: 'interrupt', epoch: 4, reason: 'keyboard' },

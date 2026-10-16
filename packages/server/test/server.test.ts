@@ -262,3 +262,94 @@ describe('resume and heartbeat', () => {
     expect(client.socket.closedWith).toEqual([4408, 'heartbeat timeout']);
   });
 });
+
+describe('authentication and per-session config', () => {
+  const principals: Record<string, { id: string; docId: string }> = { 'token-alice': { id: 'alice', docId: 'doc-1' }, 'token-bob': { id: 'bob', docId: 'doc-2' } };
+  const authenticate = async ({ token }: { token: string | undefined }) => (token ? principals[token] : undefined);
+
+  it('refuses a missing or unknown token with UNAUTHORIZED and closes 4401', async () => {
+    for (const auth of [undefined, 'nope']) {
+      const { model, connect } = setup({}, { authenticate });
+      const client = connect();
+      client.send({ type: 'hello', tools: [], ...(auth ? { auth } : {}) });
+      await flush();
+      expect(client.socket.ofType('error')[0]).toMatchObject({ code: 'UNAUTHORIZED', recoverable: false });
+      expect(client.socket.closedWith).toEqual([4401, 'unauthorized']);
+      expect(model.sessions).toHaveLength(0);
+    }
+  });
+
+  it('treats a throwing authenticate as a refusal', async () => {
+    const { connect } = setup({}, { authenticate: () => { throw new Error('auth service down'); } });
+    const client = connect();
+    client.send({ type: 'hello', tools: [], auth: 'x' });
+    await flush();
+    expect(client.socket.ofType('error')[0]).toMatchObject({ code: 'UNAUTHORIZED' });
+  });
+
+  it('passes the principal to tools and hooks, and the upgrade headers to authenticate', async () => {
+    const seen: unknown[] = [];
+    const whoami = tool({ description: '', parameters: {}, run: (_args, ctx) => (ctx.data as { id: string }).id }) as Tool<never, unknown>;
+    const model = fakeModel();
+    const agent = defineAgent({ model, instructions: 'test', tools: { whoami }, hooks: { afterToolCall: (info) => seen.push(info.data) } });
+    let headers: Headers | undefined;
+    const hub = new Hub(agent, { clock: model.clock, authenticate: async (request) => { headers = request.headers; return principals[request.token!]; } });
+    const socket = new FakeSocket();
+    const connection = hub.attach(socket, { headers: new Headers({ origin: 'https://vdoc.example' }) });
+    connection.receive(JSON.stringify({ v: 1, seq: 0, type: 'hello', tools: [], auth: 'token-alice' }));
+    await flush();
+    expect(headers?.get('origin')).toBe('https://vdoc.example');
+    model.session.emit({ type: 'response.start', responseId: 'r1' });
+    model.session.emit({ type: 'tool.call', responseId: 'r1', callId: 'c1', name: 'whoami', arguments: {} });
+    await flush();
+    expect(model.session.commandsOf('submitToolResult')[0]!.output).toBe('alice');
+    expect(seen).toEqual([{ id: 'alice', docId: 'doc-1' }]);
+  });
+
+  it('configures each session from its principal and hello context', async () => {
+    const { model, connect } = setup({}, {
+      authenticate,
+      configure: (principal, hello) => ({ instructions: `Edit ${principal?.['docId']} (${(hello.context as { title: string }).title})`, voice: 'calm', inputFormat: { encoding: 'pcmu' } }),
+    });
+    const client = connect();
+    client.send({ type: 'hello', tools: [], auth: 'token-alice', context: { title: 'Q3 plan' } });
+    await flush();
+    expect(model.session.config).toMatchObject({ instructions: 'Edit doc-1 (Q3 plan)', voice: 'calm' });
+    // Negotiated audio formats always win over configure().
+    expect(model.session.config.inputFormat).toEqual(pcm24);
+  });
+
+  it('only lets the same principal resume a session', async () => {
+    const { model, connect } = setup({}, { authenticate });
+    const alice = connect();
+    alice.send({ type: 'hello', tools: [], auth: 'token-alice' });
+    await flush();
+    const sessionId = alice.socket.ofType('ready')[0]!.sessionId;
+    alice.connection.closed();
+
+    const bob = connect();
+    bob.send({ type: 'hello', tools: [], auth: 'token-bob', sessionId, resumeFrom: 0 });
+    await flush();
+    expect(bob.socket.ofType('error')[0]).toMatchObject({ code: 'RESUME_FAILED' });
+    expect(bob.socket.ofType('ready')).toHaveLength(0);
+
+    const aliceAgain = connect();
+    aliceAgain.send({ type: 'hello', tools: [], auth: 'token-alice', sessionId, resumeFrom: 0 });
+    await flush();
+    expect(aliceAgain.socket.ofType('ready')[0]).toMatchObject({ sessionId });
+    expect(model.sessions).toHaveLength(1);
+  });
+
+  it('queues messages that arrive while authenticating, in order', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const { model, connect } = setup({}, { authenticate: async () => { await gate; return { id: 'alice' }; } });
+    const client = connect();
+    client.send({ type: 'hello', tools: [], auth: 't' });
+    client.send({ type: 'text', text: 'first' });
+    client.send({ type: 'text', text: 'second' });
+    release();
+    await flush();
+    expect(model.session.commandsOf('sendText').map((c) => c.text)).toEqual(['first', 'second']);
+  });
+});

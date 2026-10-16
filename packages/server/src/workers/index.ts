@@ -1,5 +1,5 @@
 import type { AgentDefinition } from '@vrealtime/core';
-import { Hub, type AttachOptions, type Connection, type WebSocketLike } from '../index.js';
+import { Hub, type AttachOptions, type WebSocketLike } from '../index.js';
 
 /** The Workers `WebSocket` surface the server needs (`accept()` plus event listeners). */
 interface WorkersSocket extends WebSocketLike {
@@ -40,9 +40,9 @@ export function upgrade(agent: AgentDefinition | Hub, request: Request, options?
   const client = pair[0];
   const server = pair[1];
   server.accept();
-  hubFor(agent, options).attach(server);
+  hubFor(agent, options).attach(server, { headers: request.headers });
   return new Response(null, { status: 101, webSocket: client } as ResponseInit);
 }
 
-export type { AttachOptions, Connection };
+export type { AttachOptions, AuthRequest, Connection, Principal } from '../index.js';
 export { Hub };

@@ -39,6 +39,15 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 type RawData = Uint8Array | ArrayBuffer | Uint8Array[];
+
+function toHeaders(req: IncomingMessage): Headers {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) for (const v of value) headers.append(name, v);
+    else if (value !== undefined) headers.set(name, value);
+  }
+  return headers;
+}
 const utf8 = new TextDecoder();
 
 function toBytes(data: RawData): Uint8Array {
@@ -99,7 +108,7 @@ export async function serve(agent: AgentDefinition, options: ServeOptions = {}):
         get bufferedAmount() {
           return client.bufferedAmount;
         },
-      });
+      }, { headers: toHeaders(req) });
       client.on('message', (data: RawData, isBinary: boolean) => connection.receive(isBinary ? toBytes(data) : utf8.decode(toBytes(data))));
       client.on('close', () => connection.closed());
       client.on('error', () => connection.closed());

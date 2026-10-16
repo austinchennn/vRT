@@ -24,7 +24,7 @@ const failureCode = oneOf('INTERRUPTED', 'REJECTED', 'INVALID', 'TIMEOUT', 'FAIL
 const turnState = oneOf('idle', 'listening', 'thinking', 'speaking', 'acting');
 
 const CLIENT: Record<string, Shape> = {
-  hello: { tools: arrayOf(toolSpec), input: opt(format), output: opt(format), sessionId: opt(str), resumeFrom: opt(uint), context: any },
+  hello: { tools: arrayOf(toolSpec), input: opt(format), output: opt(format), sessionId: opt(str), resumeFrom: opt(uint), context: any, auth: opt(str) },
   text: { text: str },
   interrupt: { epoch: uint, reason: oneOf('speech', 'user', 'keyboard') },
   playback: { itemId: str, playedMs: num },

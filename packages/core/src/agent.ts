@@ -30,6 +30,8 @@ export interface ToolCallInfo {
   where: 'server' | 'client';
   risk: ToolRisk;
   turn: Turn;
+  /** Data the edge attached to the session, e.g. the authenticated principal. */
+  data: unknown;
 }
 
 export type BeforeToolCall = (call: ToolCallInfo) =>

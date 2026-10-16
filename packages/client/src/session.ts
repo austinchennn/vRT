@@ -58,6 +58,11 @@ export interface ConnectOptions {
   audio?: false | { input?: 'mic' | AudioSourceFactory | false; output?: 'speaker' | AudioSink | false };
   /** App context sent with `hello` (and later with `setContext`). */
   context?: unknown;
+  /**
+   * Token sent in `hello` (never in the URL). A function is called on every
+   * (re)connect, so short-lived tokens can be refreshed.
+   */
+  auth?: string | (() => string | Promise<string>);
   reconnect?: ReconnectOptions | false;
   /** Ping interval; the socket is considered dead after 2.5 intervals of silence. Default 15 s. */
   heartbeatMs?: number;
@@ -203,7 +208,7 @@ export class ClientSession {
     const socket = new Socket(this.#url);
     socket.binaryType = 'arraybuffer';
     this.#socket = socket;
-    socket.addEventListener('open', () => this.#hello());
+    socket.addEventListener('open', () => void this.#hello(socket));
     socket.addEventListener('message', (event) => {
       if (this.#socket === socket) this.#receive(event.data);
     });
@@ -212,7 +217,17 @@ export class ClientSession {
     });
   }
 
-  #hello(): void {
+  async #hello(socket: ClientSocket): Promise<void> {
+    let auth: string | undefined;
+    try {
+      const option = this.#options.auth;
+      auth = typeof option === 'function' ? await option() : option;
+    } catch (error) {
+      this.#emitter.emit({ type: 'error', code: 'AUTH_FAILED', message: error instanceof Error ? error.message : String(error), recoverable: false });
+      socket.close(4401, 'auth failed');
+      return;
+    }
+    if (this.#socket !== socket || socket.readyState !== OPEN) return;
     const tools = Object.entries(this.#options.tools ?? {}).map(([name, tool]) => ({ name, description: tool.description ?? '', parameters: tool.parameters }));
     const audio = this.#options.audio;
     const hello: Unsequenced<ClientMessage> = {
@@ -222,6 +237,7 @@ export class ClientSession {
       ...(audio && audio.output ? { output: PCM24 } : {}),
       ...(this.#sessionId !== undefined ? { sessionId: this.#sessionId, resumeFrom: this.#inbox.lastSeq } : {}),
       ...(this.#options.context !== undefined && !this.#everReady ? { context: this.#options.context } : {}),
+      ...(auth !== undefined ? { auth } : {}),
     };
     this.#write(this.#outbox.stamp(hello));
     this.#lastMessageAt = Date.now();
@@ -334,7 +350,8 @@ export class ClientSession {
         this.#outbox.ack(message.upTo);
         return;
       case 'error':
-        if (message.code === 'RESUME_FAILED') this.#giveUp = true;
+        // Retrying cannot help with these, unless a token function can fetch a fresh token.
+        if (message.code === 'RESUME_FAILED' || (message.code === 'UNAUTHORIZED' && typeof this.#options.auth !== 'function')) this.#giveUp = true;
         if (!message.recoverable && this.#ready) {
           this.#ready.reject(new Error(`${message.code}: ${message.message}`));
           this.#ready = undefined;

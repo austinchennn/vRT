@@ -190,7 +190,7 @@ const getWeather = tool({
 版本规则：`hello` 带协议版本和可选能力列表；小版本（v1.x）只能新增可选字段、新消息类型和新能力，旧客户端可以忽略；破坏性变更只能出现在大版本。
 
 - **二进制帧**放音频：1 字节类型 + 4 字节序号 + 负载，不做 base64。
-- **JSON 帧**放控制：`hello`（协议版本、客户端工具、音频格式、`sessionId` + 恢复点）、`ready`、`audio.start`（之后的二进制输出帧属于哪个 item，客户端据此按 item 上报已播放 ms）、`turn.state`、`transcript`、`text`、`tool.call` / `tool.call.delta` / `tool.result`、`interrupt`、`playback`（已播放 ms）、`ack`、`ping` / `pong`、`error`。
+- **JSON 帧**放控制：`hello`（协议版本、客户端工具、音频格式、`sessionId` + 恢复点；v1.1 起可带 `auth` 短期令牌，放在首条消息里而不是 URL，服务端每次握手和续传都校验，续传必须是同一主体）、`ready`、`audio.start`（之后的二进制输出帧属于哪个 item，客户端据此按 item 上报已播放 ms）、`turn.state`、`transcript`、`text`、`tool.call` / `tool.call.delta` / `tool.result`、`interrupt`、`playback`（已播放 ms）、`ack`、`ping` / `pong`、`error`。
 - 每条消息带 `seq`，与轮次相关的消息带 `epoch`；断线重连时客户端带 `sessionId` 和 `lastSeq` 恢复，双方补发对方没收到的消息。`hello`、`ready`、`audio.start`、`ack`、`ping`、`pong` 只对当前连接有效，`seq` 为 0，不补发。
 
 TypeScript 实现见 [`packages/protocol/src`](../packages/protocol/src)。
