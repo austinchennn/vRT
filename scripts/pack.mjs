@@ -1,5 +1,6 @@
 // Builds every package and writes one installable tarball per package to release/.
-// Until the public npm release (M4), apps install these: npm i ./release/vrealtime-core-0.1.0.tgz ...
+// Releases publish exactly these files (scripts/publish.mjs); apps can also install them
+// directly to try unreleased changes: npm i ./release/vrealtime-core-<version>.tgz ...
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
