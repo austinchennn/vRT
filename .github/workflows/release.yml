@@ -30,8 +30,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
           registry-url: https://registry.npmjs.org
+          # No dependency cache in release builds: a poisoned cache must never reach a published package.
       - run: npm ci
       - run: npm run check:spec
       - run: npm run typecheck

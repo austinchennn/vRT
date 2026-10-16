@@ -13,10 +13,14 @@ Publishing is re-runnable: versions already on npm are skipped, so a release tha
 These steps need the owner's own npm and GitHub accounts; nobody else can do them.
 
 1. **Create the npm organization** `vrealtime` at <https://www.npmjs.com/org/create>. The free plan is enough for public packages.
-2. **Create a publish token** at npmjs.com, under Access Tokens, as a granular access token:
-   - write access limited to the `@vrealtime` organization's packages;
-   - the shortest expiry that covers the next release;
-   - if the account requires two-factor authentication for publishing, allow this token to publish without a one-time password, because CI cannot type one.
+2. **Create a publish token** at npmjs.com: profile picture → Access Tokens → Generate New Token.
+   - **Token name:** something that says where it is used, for example `vrt-github-actions-release`.
+   - **Bypass two-factor authentication:** checked, because CI cannot type a one-time password.
+   - **Allowed IP ranges:** empty, because GitHub-hosted runners have no fixed addresses.
+   - **Packages and scopes:** permission **Read and write (publish and stage)**, then **Only select packages and scopes** and the `@vrealtime` scope. The scope appears once the organization exists. "Stage only" would make `npm publish` fail with `E_STAGE_REQUIRED`.
+   - **Organizations:** **No access**. Organization access manages members and teams, and does not grant publishing.
+   - **Expiration:** short, for example 7 days. The token is only needed until trusted publishing is set up after the first release.
+   - Copy the token when it is shown; it is displayed only once.
 3. **Store the token in GitHub** as an Actions secret named `NPM_TOKEN`, under Settings → Secrets and variables → Actions. Then optionally open Settings → Environments → `npm` and add required reviewers, so every release waits for an approval. The environment is created by the first workflow run.
 
 ## Releasing a version
@@ -51,10 +55,16 @@ A version with a prerelease suffix (`1.0.0-rc.1`) is published under the dist-ta
 - **A publish failed halfway** (network, registry error): re-run the failed workflow run. Packages already published are skipped.
 - **A broken version was published:** publish a fixed patch version and deprecate the broken one with `npm deprecate @vrealtime/<package>@<version> "<reason>"`. Unpublishing is limited to 72 hours and breaks anyone who installed the version, so avoid it.
 
-## Later: publishing without a token
+## After the first release: publishing without a token
 
-After the first release, every package exists on npm and can switch to [trusted publishing](https://docs.npmjs.com/trusted-publishers). npm then trusts this repository's workflow directly and no long-lived token is needed:
+npm is retiring direct publishing with access tokens: it stops working in January 2027 ([About access tokens](https://docs.npmjs.com/about-access-tokens)). The replacement is [trusted publishing](https://docs.npmjs.com/trusted-publishers), where npm trusts this repository's workflow through OIDC and no long-lived token exists. It is configured per package, so it can only be set up once the first release has created the packages:
 
-1. On each package's settings page, add a trusted publisher: GitHub Actions, repository `austinchennn/vRT`, workflow `release.yml`, environment `npm`.
-2. In `release.yml`, make sure the npm version supports trusted publishing (add a step that installs a recent npm, since the one bundled with Node 22 may be too old).
-3. Delete the `NPM_TOKEN` secret and revoke the token.
+1. On each package's settings page on npmjs.com, add a trusted publisher:
+   - GitHub Actions;
+   - organization or user `austinchennn`, repository `vRT`;
+   - workflow `release.yml`, environment `npm`;
+   - allow `npm publish` for direct releases, or keep the default staged publishing to approve every version with 2FA.
+
+   A new configuration must complete a publish within 2 days, or it expires.
+2. In `release.yml`, install npm 11.5.1 or later (trusted publishing needs it, and Node 22's bundled npm is older), and drop `NODE_AUTH_TOKEN`.
+3. In each package's Settings → Publishing access, choose "Require two-factor authentication and disallow tokens". Then delete the `NPM_TOKEN` secret and revoke the token.
