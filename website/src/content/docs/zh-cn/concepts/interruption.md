@@ -27,9 +27,10 @@ sidebar:
 1. 在本地关闭当前 epoch；
 2. 这个 epoch 里排队的工具调用全部回 `INTERRUPTED`，不执行；
 3. 中止正在执行的工具的 `signal`；
-4. 停止播放并丢弃缓冲的音频；
-5. 发出 `interrupted`（`source: 'local'`），UI 可以立刻清掉预览；
-6. 然后再通知服务端。
+4. 这个 epoch 里所有还没结束的 `tool.stream` 调用，立即以 `cancelled` 结束；
+5. 停止播放并丢弃缓冲的音频；
+6. 发出 `interrupted`（`source: 'local'`），UI 可以立刻清掉预览；
+7. 然后再通知服务端。
 
 服务端停下模型，结算这一轮还在等待的调用，把对话截断到用户听到的位置，然后回一个 `interrupted` 确认。客户端不会再重复通知这次确认。如果是服务端自己发起的打断（比如它的语音活动检测听到用户开口），客户端会以 `source: 'server'` 通知。
 

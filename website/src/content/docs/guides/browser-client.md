@@ -67,7 +67,7 @@ const applyEdit = {
 | `state` | The agent's turn state: `idle`, `listening`, `thinking`, `speaking` or `acting` |
 | `epoch` | The newest epoch seen from the server |
 | `sessionId`, `connected` | The session and whether a connection is open |
-| `capabilities` | Optional protocol features in effect for the session |
+| `capabilities` | Optional protocol features in effect for the session, for example `tool-stream-v1` |
 
 ## Events
 
@@ -76,9 +76,13 @@ Subscribe with `session.on(type, listener)`, which returns an unsubscribe functi
 ```js
 session.on('state', ({ state }) => (statusLine.textContent = state));
 session.on('transcript', ({ role, itemId, text, final }) => transcript.upsert(itemId, role, text, final));
-session.on('tool.preview', (preview) => previews.show(preview));
-session.on('tool.result', ({ callId }) => previews.clear((p) => p.callId === callId));
-session.on('interrupted', ({ epoch }) => previews.clear((p) => p.epoch <= epoch));
+session.on('tool.stream', (step) => {
+  if (step.phase === 'arguments-delta') previews.append(step.callId, step.delta);    // render while the model writes
+  if (step.phase === 'arguments-complete') previews.replace(step.callId, step.arguments);
+  if (step.phase === 'settled' || step.phase === 'cancelled' || step.phase === 'failed') previews.clear(step.callId);
+});
 session.on('reconnecting', ({ attempt }) => banner.show(`Reconnecting (${attempt})…`));
-session.on('closed', () => previews.clear(() => true));
+session.on('closed', () => previews.clearAll());
 ```
+
+`tool.stream` reports every call's lifecycle, server or app, and always ends a call with one terminal phase. A local `interrupt()` ends open calls as `cancelled` at once. See [Tools](/concepts/tools/#watching-a-call-tool-streams).
