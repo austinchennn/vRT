@@ -31,18 +31,35 @@ function isNodeSubpath(srcRelative) {
   return srcRelative === 'node.ts' || srcRelative.split(/[\\/]/)[0] === 'node';
 }
 
-async function minGzipBytes(entry) {
+/**
+ * Adapters are measured together with the internal base they share
+ * (`@vrealtime/openai-compatible`); everything else they import stays external.
+ */
+const INLINED = ['@vrealtime/openai-compatible'];
+
+async function minGzipBytes(entry, inlineInternal) {
   const result = await build({
     entryPoints: [entry],
     bundle: true,
     minify: true,
     format: 'esm',
     platform: 'neutral',
-    packages: 'external',
+    ...(inlineInternal
+      ? { plugins: [externalExcept(INLINED)], mainFields: ['module', 'main'], conditions: ['import'] }
+      : { packages: 'external' }),
     write: false,
     logLevel: 'silent',
   });
   return gzipSync(result.outputFiles[0].contents, { level: 9 }).length;
+}
+
+function externalExcept(inlined) {
+  return {
+    name: 'external-except',
+    setup(build) {
+      build.onResolve({ filter: /^[^./]/ }, (args) => (inlined.includes(args.path) ? undefined : { path: args.path, external: true }));
+    },
+  };
 }
 
 for (const pkg of workspacePackages()) {
@@ -70,7 +87,7 @@ for (const pkg of workspacePackages()) {
   let size;
   try {
     statSync(entry);
-    size = await minGzipBytes(entry);
+    size = await minGzipBytes(entry, ADAPTERS.has(name));
   } catch {
     fail(`${name}: dist/index.js missing, run npm run build first`);
     continue;

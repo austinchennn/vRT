@@ -67,11 +67,10 @@ npm run build && npm run check:budgets && npm run bench
 |---|---|
 | `@vrealtime/core` | Model interface, normalized events, agent runtime, tools, hooks |
 | `@vrealtime/protocol` | Wire protocol v1 between apps and a vRealTime server |
-| `@vrealtime/boson` | Boson Higgs Realtime adapter |
+| `@vrealtime/boson`, `@vrealtime/openai`, `@vrealtime/gemini` | Provider adapters (Boson Higgs Realtime, OpenAI Realtime, Gemini Live) |
 | `@vrealtime/server` | Attach any WebSocket; Node `serve()` with a debug page |
 | `@vrealtime/client` | Browser SDK: app-side tools with the epoch gate, mic and playback |
 | `@vrealtime/testing` | Scripted fake model for tests |
-| `@vrealtime/openai`, `@vrealtime/gemini` | Planned (M2) |
 | `@vrealtime/cascade`, `@vrealtime/ai-sdk` | Planned (M2): STT + any LLM + TTS as one realtime model |
 | `@vrealtime/react` | Planned (M2): React hooks |
 

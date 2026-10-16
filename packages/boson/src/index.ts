@@ -1,7 +1,8 @@
 import type { AudioFormat, Capabilities, RealtimeModel, SessionConfig } from '@vrealtime/core';
-import { createCompatibleModel, type SocketFactory } from './openai-compatible.js';
+import { createCompatibleModel, type SocketFactory } from '@vrealtime/openai-compatible';
 
-export type { ProviderSocket, SocketFactory } from './openai-compatible.js';
+export { fetchSocket } from '@vrealtime/openai-compatible';
+export type { ProviderSocket, SocketFactory } from '@vrealtime/openai-compatible';
 
 export const BOSON_REALTIME_URL = 'wss://api.boson.ai/v1/realtime';
 

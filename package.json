@@ -21,6 +21,7 @@
   "devDependencies": {
     "@types/node": "22.18.0",
     "@types/ws": "^8.18.1",
+    "ai": "^7.0.142",
     "esbuild": "0.25.10",
     "typescript": "5.9.3",
     "vitest": "3.2.4",
