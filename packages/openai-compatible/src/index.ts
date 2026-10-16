@@ -30,11 +30,30 @@ export interface ProviderSocket {
   addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: { data?: unknown; code?: number; reason?: string }) => void): void;
 }
 
-/** Opens a socket with auth headers. The default uses the global `WebSocket` with a `headers` init (Node 22+/undici, Bun). */
-export type SocketFactory = (url: string, headers: Record<string, string>) => ProviderSocket;
+/**
+ * Opens a socket with auth headers. It may return a socket that is already open.
+ * The default uses the global `WebSocket` with a `headers` init (Node 22+/undici, Bun).
+ */
+export type SocketFactory = (url: string, headers: Record<string, string>) => ProviderSocket | Promise<ProviderSocket>;
 
 export const defaultSocketFactory: SocketFactory = (url, headers) =>
   new (WebSocket as unknown as new (url: string, init: { headers: Record<string, string> }) => ProviderSocket)(url, { headers });
+
+type UpgradeFetch = (url: string, init: { headers: Record<string, string> }) => Promise<{ status: number; webSocket?: (ProviderSocket & { accept(): void }) | null }>;
+
+/**
+ * Opens provider sockets through a `fetch` upgrade, for runtimes whose `WebSocket`
+ * cannot send headers (Cloudflare Workers, Durable Objects).
+ */
+export function fetchSocket(fetchImpl: UpgradeFetch = fetch as unknown as UpgradeFetch): SocketFactory {
+  return async (url, headers) => {
+    const response = await fetchImpl(url.replace(/^ws/, 'http'), { headers: { ...headers, Upgrade: 'websocket' } });
+    const socket = response.webSocket;
+    if (!socket) throw new Error(`WebSocket upgrade failed (HTTP ${response.status})`);
+    socket.accept();
+    return socket;
+  };
+}
 
 export interface CompatibleOptions {
   provider: string;
@@ -348,27 +367,36 @@ export function createCompatibleModel(options: CompatibleOptions): RealtimeModel
       const signal = connectOptions?.signal;
       signal?.throwIfAborted();
       const merged: SessionConfig = { ...options.defaults, ...config };
-      const socket = (options.socket ?? defaultSocketFactory)(options.url, options.headers);
+      const socket = await (options.socket ?? defaultSocketFactory)(options.url, options.headers);
+      if (signal?.aborted) {
+        socket.close(1000, 'aborted');
+        signal.throwIfAborted();
+      }
+      if (socket.readyState > OPEN) throw new Error(`${options.provider}: connection closed before open`);
       const session = new CompatibleSession(socket, merged, options);
-      await new Promise<void>((resolve, reject) => {
-        const fail = (error: Error) => {
-          signal?.removeEventListener('abort', onAbort);
-          reject(error);
-        };
-        const onAbort = () => {
-          socket.close(1000, 'aborted');
-          fail(signal?.reason instanceof Error ? signal.reason : new Error('Aborted'));
-        };
-        signal?.addEventListener('abort', onAbort, { once: true });
-        socket.addEventListener('open', () => {
-          signal?.removeEventListener('abort', onAbort);
-          resolve();
-        });
-        socket.addEventListener('error', () => fail(new Error(`${options.provider}: connection failed`)));
-        socket.addEventListener('close', (event) => fail(new Error(`${options.provider}: connection closed before open (${event.code ?? ''})`)));
-      });
+      if (socket.readyState !== OPEN) await waitForOpen(socket, options.provider, signal);
       socket.send(JSON.stringify({ type: 'session.update', session: sessionPayload(merged, options) }));
       return session;
     },
   };
+}
+
+function waitForOpen(socket: ProviderSocket, provider: string, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const fail = (error: Error) => {
+      signal?.removeEventListener('abort', onAbort);
+      reject(error);
+    };
+    const onAbort = () => {
+      socket.close(1000, 'aborted');
+      fail(signal?.reason instanceof Error ? signal.reason : new Error('Aborted'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    socket.addEventListener('open', () => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    });
+    socket.addEventListener('error', () => fail(new Error(`${provider}: connection failed`)));
+    socket.addEventListener('close', (event) => fail(new Error(`${provider}: connection closed before open (${event.code ?? ''})`)));
+  });
 }

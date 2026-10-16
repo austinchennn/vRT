@@ -2,7 +2,7 @@ import type { RealtimeEvent, RealtimeSession } from '@vrealtime/core';
 import { fromBase64, toBase64 } from '@vrealtime/core';
 import { describe, expect, it } from 'vitest';
 import { BOSON_REALTIME_URL, boson, type ProviderSocket } from '../src/index.js';
-import { MAX_APPEND_BYTES } from '../src/openai-compatible.js';
+import { MAX_APPEND_BYTES } from '@vrealtime/openai-compatible';
 
 type Listener = (event: { data?: unknown; code?: number; reason?: string }) => void;
 
