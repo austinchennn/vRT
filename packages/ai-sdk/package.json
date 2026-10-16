@@ -1,0 +1,27 @@
+{
+  "name": "@vrealtime/ai-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "@vrealtime/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@vrealtime/cascade": "0.0.0"
+  },
+  "peerDependencies": {
+    "ai": ">=7.0.0"
+  }
+}

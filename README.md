@@ -71,7 +71,8 @@ npm run build && npm run check:budgets && npm run bench
 | `@vrealtime/server` | Attach any WebSocket; Node `serve()` with a debug page |
 | `@vrealtime/client` | Browser SDK: app-side tools with the epoch gate, mic and playback |
 | `@vrealtime/testing` | Scripted fake model for tests |
-| `@vrealtime/cascade`, `@vrealtime/ai-sdk` | Planned (M2): STT + any LLM + TTS as one realtime model |
+| `@vrealtime/cascade`, `@vrealtime/ai-sdk` | STT + any text LLM + TTS as one realtime model; AI SDK models as the LLM |
+| `@vrealtime/vad` | Energy VAD for turn detection where the model has none |
 | `@vrealtime/react` | Planned (M2): React hooks |
 
 ## License

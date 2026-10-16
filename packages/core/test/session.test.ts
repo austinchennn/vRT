@@ -347,6 +347,28 @@ describe('interrupt guarantees', () => {
     expect(ofType('audio')).toHaveLength(0);
   });
 
+  it('handles a model that ends its response synchronously inside cancel()', async () => {
+    const { fake, session } = await setup({
+      clientTools: ['paint'],
+      capabilities: {},
+    });
+    // Models like Gemini and cascade cannot defer: response.end arrives during cancel().
+    const cancel = fake.cancel.bind(fake);
+    fake.cancel = () => {
+      cancel();
+      fake.emit({ type: 'response.end', responseId: 'r1', status: 'cancelled' });
+    };
+    userTurn(fake);
+    speak(fake, 'r1', 'a1', 1000, 'Hello there');
+    call(fake, 'r1', 'c1', 'paint');
+    await flush();
+    session.playback('a1', 400);
+    session.interrupt();
+    expect(fake.commandsOf('truncate')).toEqual([{ type: 'truncate', itemId: 'a1', audioEndMs: 400 }]);
+    expect(results(fake)['c1']).toMatchObject({ error: { code: 'INTERRUPTED' } });
+    expect(session.state).toBe('idle');
+  });
+
   it('a provider-side cancel is handled as an interruption', async () => {
     const { fake, session, ofType } = await setup({ tools: { t: tool({ description: '', parameters: {}, run: () => new Promise(() => {}) }) as Tool<never, unknown> } });
     userTurn(fake);

@@ -4,6 +4,7 @@ import { Emitter } from './emitter.js';
 import type { EventOf, RealtimeEvent } from './events.js';
 import type { Capabilities, RealtimeSession, SessionConfig, ToolSpec } from './model.js';
 import { validateToolArgs, type Tool, type ToolResult } from './tool.js';
+import type { Vad } from './vad.js';
 
 /** Time source and timers; injectable so tests run on virtual time. */
 export interface Clock {
@@ -115,6 +116,8 @@ export class AgentSession {
   readonly #serverTools: ReadonlyMap<string, Tool<never, unknown>>;
   #clientToolNames: Set<string>;
   readonly #unsubscribe: (() => void)[] = [];
+  /** Runtime turn detection, only when the model has none. */
+  readonly #vad: Vad | undefined;
 
   #epoch = 0;
   #turnCount = 0;
@@ -153,6 +156,7 @@ export class AgentSession {
     this.#emitter = new Emitter<AgentEvent>((error) => this.#hook(() => agent.hooks?.onError?.(toError(error), true)));
     this.#serverTools = new Map(Object.entries(agent.tools ?? {}));
     this.#clientToolNames = new Set(acceptedClientTools(agent, options.clientTools).map((spec) => spec.name));
+    this.#vad = agent.vad && !this.capabilities.turnDetection.server && agent.turnDetection !== null ? agent.vad() : undefined;
     this.#listen();
   }
 
@@ -183,9 +187,18 @@ export class AgentSession {
     return this.#emitter.on(type, listener);
   }
 
-  /** Hot path: forwarded synchronously. */
+  /** Hot path: forwarded synchronously (and run through the runtime VAD, if any). */
   sendAudio(chunk: AudioChunk): void {
-    if (!this.#closed) this.#model.sendAudio(chunk);
+    if (this.#closed) return;
+    this.#model.sendAudio(chunk);
+    const vad = this.#vad?.process(chunk);
+    if (vad === 'start') {
+      this.#interrupt('speech', false);
+      this.#speechEndAt = undefined;
+      this.#ensureTurn('listening');
+    } else if (vad === 'end') {
+      this.commitAudio();
+    }
   }
 
   /** Manual turn end (or the edge's own VAD): commits buffered audio and asks for a reply. */
@@ -230,6 +243,13 @@ export class AgentSession {
     const closedEpoch = this.#epoch;
     this.#epoch++;
 
+    // Decide what belongs to the closed epoch before calling into the model: a model may
+    // end its response synchronously inside cancel(), and that must not hide anything here.
+    const interruptedItems = [...this.#audioItems].filter(([, item]) => this.#responses.get(item.responseId)?.epoch === closedEpoch).map(([itemId]) => itemId);
+    const interruptedCalls = [...this.#calls.values()].filter(
+      (record) => record.epoch === closedEpoch && record.status !== 'settled' && !(record.status === 'running' && record.tool?.async),
+    );
+
     const responseId = this.#openResponse;
     if (responseId !== undefined) {
       this.#openResponse = undefined;
@@ -239,16 +259,11 @@ export class AgentSession {
     }
     this.#awaitingResponse = false;
 
-    for (const [itemId, item] of this.#audioItems) {
-      if (this.#responses.get(item.responseId)?.epoch === closedEpoch) {
-        this.#interruptedItems.add(itemId);
-        this.#truncate(itemId);
-      }
+    for (const itemId of interruptedItems) {
+      this.#interruptedItems.add(itemId);
+      this.#truncate(itemId);
     }
-
-    for (const record of this.#calls.values()) {
-      if (record.epoch !== closedEpoch || record.status === 'settled') continue;
-      if (record.status === 'running' && record.tool?.async) continue;
+    for (const record of interruptedCalls) {
       record.controller.abort(new Error('Interrupted'));
       this.#settle(record, { ok: false, code: 'INTERRUPTED', message: `Interrupted by ${reason}` });
     }

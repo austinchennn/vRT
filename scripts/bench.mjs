@@ -1,6 +1,7 @@
 // Per-chunk framework cost on the audio hot path (docs/ARCHITECTURE.md §1: < 50 µs).
 // Runs against the built package: npm run build && npm run bench
 import { Emitter, Pcm16Resampler, toBase64 } from '../packages/core/dist/index.js';
+import { energyVad } from '../packages/vad/dist/index.js';
 
 const BUDGET_US = 50;
 const ITERATIONS = 20_000;
@@ -12,10 +13,13 @@ const emitter = new Emitter();
 let sink = 0;
 emitter.on('output.audio', (event) => { sink += event.chunk.data.byteLength; });
 const resampler = new Pcm16Resampler(24000, 16000);
+const vad = energyVad()();
 const format = { encoding: 'pcm16', sampleRate: 24000, channels: 1 };
 
 function step() {
-  emitter.emit({ type: 'output.audio', responseId: 'r', itemId: 'i', chunk: { data: chunk, format } });
+  const audio = { data: chunk, format };
+  emitter.emit({ type: 'output.audio', responseId: 'r', itemId: 'i', chunk: audio });
+  if (vad.process(audio) === 'start') sink++;
   sink += toBase64(resampler.process(chunk)).length;
 }
 
@@ -24,6 +28,6 @@ const start = performance.now();
 for (let i = 0; i < ITERATIONS; i++) step();
 const perChunkUs = ((performance.now() - start) * 1000) / ITERATIONS;
 
-console.log(`emit + resample 24→16 kHz + base64, 20 ms chunk: ${perChunkUs.toFixed(2)} µs (budget ${BUDGET_US} µs)`);
+console.log(`emit + VAD + resample 24→16 kHz + base64, 20 ms chunk: ${perChunkUs.toFixed(2)} µs (budget ${BUDGET_US} µs)`);
 if (sink === 0) throw new Error('unreachable');
 if (perChunkUs > BUDGET_US) process.exit(1);

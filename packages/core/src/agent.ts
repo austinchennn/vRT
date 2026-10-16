@@ -1,5 +1,6 @@
 import type { RealtimeModel } from './model.js';
 import type { Tool, ToolResult, ToolRisk } from './tool.js';
+import type { VadFactory } from './vad.js';
 
 export type TurnState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'acting';
 
@@ -58,6 +59,12 @@ export interface AgentDefinition {
   turnDetection?: 'server' | 'semantic' | null;
   /** Client tool calls that get no result within this time resolve as TIMEOUT. */
   clientToolTimeoutMs?: number;
+  /**
+   * Turn detection for models without server VAD: the runtime runs it on incoming
+   * audio, interrupts on speech start and commits + asks for a reply on speech end.
+   * Ignored when the model detects turns itself or `turnDetection` is `null`.
+   */
+  vad?: VadFactory;
 }
 
 export function defineAgent(definition: AgentDefinition): AgentDefinition {

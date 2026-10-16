@@ -7,7 +7,7 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "source": "./src/index.ts",
+      "@vrealtime/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
