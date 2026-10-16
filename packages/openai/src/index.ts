@@ -68,3 +68,6 @@ export function openai(options: OpenAIOptions = {}): RealtimeModel {
     ...(options.socket ? { socket: options.socket } : {}),
   });
 }
+
+export { openaiStt, openaiTts, pcm16ToWav } from './speech.js';
+export type { SpeechOptions, SttOptions, TtsOptions } from './speech.js';
