@@ -144,6 +144,9 @@ npm install @vrealtime/client
 
 The [installation guide](https://austinchennn.github.io/vRT/get-started/installation/) lists every model and optional package. To try unreleased changes from `main`, run `npm run pack` and install the tarballs it writes to `release/`; releases publish those same files ([RELEASING.md](RELEASING.md)).
 
+The [Python protocol foundation](python/) provides standard-library-only message and audio
+codecs with shared spec-vector tests. It is not yet a connection/session SDK.
+
 ## Development
 
 ```bash
