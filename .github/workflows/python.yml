@@ -1,0 +1,42 @@
+name: Python protocol
+
+on:
+  push:
+    branches: [main]
+    paths: ['python/**', 'spec/**', '.github/workflows/python.yml']
+  pull_request:
+    paths: ['python/**', 'spec/**', '.github/workflows/python.yml']
+
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -e './python[dev]'
+      - run: python -m ruff check python
+      - run: python -m ruff format --check python
+      - run: python -m pytest python/tests
+      - run: python -m compileall -q python/src
+      - name: Check total production Python core budget
+        shell: python
+        run: |
+          from pathlib import Path
+          lines = sum(len(p.read_text().splitlines()) for p in Path('python/src').rglob('*.py'))
+          print(f'Python core: {lines} / 800 lines')
+          assert lines <= 800, 'Issue #18 core budget exceeded'
+      - run: python -m build python
+      - name: Check default wheel and sdist installations
+        shell: bash
+        run: |
+          for artifact in python/dist/*.whl python/dist/*.tar.gz; do
+            check_env="$RUNNER_TEMP/vrt-install"
+            python -m venv --clear "$check_env"
+            "$check_env/bin/python" -m pip install "$artifact"
+            "$check_env/bin/python" python/tests/check_install.py
+          done
