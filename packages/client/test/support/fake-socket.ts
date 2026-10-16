@@ -28,6 +28,9 @@ export class FakeSocket {
     this.closedWith = [code, reason];
     this.drop(code ?? 1000, reason ?? '');
   }
+  error() {
+    this.#fire('error', {});
+  }
   open() {
     this.readyState = 1;
     this.#fire('open', {});

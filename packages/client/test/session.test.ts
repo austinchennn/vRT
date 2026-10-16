@@ -1,6 +1,7 @@
+import { createServer } from 'node:http';
 import { decodeAudioFrame, encodeAudioFrame } from '@vrealtime/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { connect, type AudioSink, type ClientEvent, type ClientSession, type ConnectOptions } from '../src/index.js';
+import { connect, type AudioSink, type ClientEvent, ClientSession, type ConnectOptions } from '../src/index.js';
 import { FakeSocket, flush, latest } from './support/fake-socket.js';
 
 /** Every control frame the client sends must be a valid client message (spec/). */
@@ -56,13 +57,126 @@ describe('connect', () => {
   });
 
   it('rejects when the socket closes before ready or the server refuses', async () => {
-    const pending = connect('ws://test', { WebSocket: FakeSocket as never });
+    const pending = connect('ws://test', { WebSocket: FakeSocket as never, reconnect: false });
     latest().drop(1006);
     await expect(pending).rejects.toThrow(/before ready/);
     const refused = connect('ws://test', { WebSocket: FakeSocket as never });
     latest().open();
     latest().server({ type: 'error', code: 'START_FAILED', message: 'model down', recoverable: false });
     await expect(refused).rejects.toThrow(/START_FAILED/);
+  });
+
+  it('rejects an error-only handshake promptly without reconnects', async () => {
+    const pending = connect('ws://test', { WebSocket: FakeSocket, reconnect: false });
+    const rejected = expect(pending).rejects.toThrow('WebSocket handshake failed');
+    const socket = latest();
+    // No close event, even when the client tries to dispose of the failed socket.
+    vi.spyOn(socket, 'close').mockImplementation(() => {});
+    socket.error();
+    await rejected;
+    expect(socket.close).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['error', 'close'] as const)('retries initial handshake %s with backoff and resolves on ready', async (failure) => {
+    const pending = connect('ws://test', { WebSocket: FakeSocket });
+    const first = latest();
+    if (failure === 'error') first.error();
+    else first.drop();
+    vi.advanceTimersByTime(249);
+    expect(latest()).toBe(first);
+    vi.advanceTimersByTime(1);
+    const second = latest();
+    // A late event from the first attempt cannot affect the replacement.
+    first.error();
+    first.open();
+    expect(first.ofType('hello')).toHaveLength(0);
+    second.open();
+    second.server({ type: 'ready', sessionId: 'sess', input: { encoding: 'pcm16', sampleRate: 24000 }, output: { encoding: 'pcm16', sampleRate: 24000 } });
+    const session = await pending;
+    expect(session.connected).toBe(true);
+    await session.close();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('handles error then close once and exhausts initial retries', async () => {
+    const session = new ClientSession('ws://test', { WebSocket: FakeSocket, reconnect: { maxAttempts: 3, baseDelayMs: 100, maxDelayMs: 150 } });
+    const reconnecting = vi.fn();
+    const closed = vi.fn();
+    session.on('reconnecting', reconnecting);
+    session.on('closed', closed);
+    const pending = expect(session.start()).rejects.toThrow('WebSocket handshake failed');
+    for (const delay of [100, 150, 150]) {
+      latest().error(); // FakeSocket.close() also emits close synchronously.
+      expect(closed).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(delay);
+    }
+    latest().error();
+    await pending;
+    expect(reconnecting.mock.calls.map(([event]) => event.delayMs)).toEqual([100, 150, 150]);
+    expect(FakeSocket.instances).toHaveLength(4);
+    expect(closed).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('close cancels a pending initial retry and rejects start', async () => {
+    const session = new ClientSession('ws://test', { WebSocket: FakeSocket });
+    const pending = expect(session.start()).rejects.toThrow('client closed');
+    latest().error();
+    await session.close();
+    await pending;
+    vi.advanceTimersByTime(10_000);
+    expect(FakeSocket.instances).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('honors maxAttempts zero on the first handshake failure', async () => {
+    const pending = connect('ws://test', { WebSocket: FakeSocket, reconnect: { maxAttempts: 0 } });
+    const rejected = expect(pending).rejects.toThrow('WebSocket handshake failed');
+    latest().error();
+    await rejected;
+    expect(vi.getTimerCount()).toBe(0);
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+
+  it('cleans up a failed reconnect after an established session closes', async () => {
+    const { session, socket, events } = await start();
+    socket.drop();
+    vi.advanceTimersByTime(250);
+    const failed = latest();
+    vi.spyOn(failed, 'close').mockImplementation(() => {});
+    failed.error();
+    expect(events.filter((event) => event.type === 'reconnecting')).toHaveLength(2);
+    await session.close();
+    failed.drop();
+    vi.advanceTimersByTime(10_000);
+    expect(events.filter((event) => event.type === 'closed')).toHaveLength(1);
+    expect(FakeSocket.instances).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('ignores error after open and waits for close as before', async () => {
+    const { session, socket, events } = await start();
+    socket.error();
+    expect(session.connected).toBe(true);
+    expect(events).toEqual([]);
+    await session.close();
+  });
+
+  it('rejects a real Node WebSocket upgrade answered with HTTP 404', async () => {
+    vi.useRealTimers();
+    const server = createServer();
+    server.on('upgrade', (_request, socket) => socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'));
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    try {
+      const address = server.address() as { port: number };
+      await expect(connect(`ws://127.0.0.1:${address.port}`, { reconnect: false })).rejects.toThrow('WebSocket handshake failed');
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   });
 
   it('works text-only: sends text, emits transcripts and ignores audio frames', async () => {

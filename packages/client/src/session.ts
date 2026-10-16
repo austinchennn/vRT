@@ -212,12 +212,24 @@ export class ClientSession {
     const socket = new Socket(this.#url);
     socket.binaryType = 'arraybuffer';
     this.#socket = socket;
-    socket.addEventListener('open', () => void this.#hello(socket));
+    let opened = false;
+    socket.addEventListener('open', () => {
+      if (this.#socket !== socket) return;
+      opened = true;
+      void this.#hello(socket);
+    });
+    socket.addEventListener('error', () => {
+      if (opened || this.#socket !== socket) return;
+      // Detach before closing: some implementations emit close synchronously,
+      // others (including undici on a refused upgrade) never emit it.
+      this.#onClose(undefined, 'WebSocket handshake failed', true);
+      socket.close();
+    });
     socket.addEventListener('message', (event) => {
       if (this.#socket === socket) this.#receive(event.data);
     });
     socket.addEventListener('close', (event) => {
-      if (this.#socket === socket) this.#onClose(event?.code, event?.reason);
+      if (this.#socket === socket) this.#onClose(event?.code, event?.reason, !opened);
     });
   }
 
@@ -249,14 +261,14 @@ export class ClientSession {
     this.#startHeartbeat();
   }
 
-  #onClose(code?: number, reason?: string): void {
+  #onClose(code?: number, reason?: string, handshakeFailed = false): void {
     this.#socket = undefined;
     clearInterval(this.#heartbeat);
     clearTimeout(this.#ackTimer);
     this.#ackTimer = undefined;
     const reconnect = this.#options.reconnect === false ? undefined : this.#options.reconnect ?? {};
     const maxAttempts = reconnect?.maxAttempts ?? 8;
-    if (this.#closing || this.#giveUp || !this.#everReady || !reconnect || this.#attempt >= maxAttempts) {
+    if (this.#closing || this.#giveUp || (!this.#everReady && !handshakeFailed) || !reconnect || this.#attempt >= maxAttempts) {
       this.#finish(code, reason);
       return;
     }
@@ -268,11 +280,14 @@ export class ClientSession {
 
   #finish(code?: number, reason?: string): void {
     this.#socket = undefined;
+    clearTimeout(this.#reconnectTimer);
+    clearTimeout(this.#ackTimer);
+    this.#ackTimer = undefined;
     clearInterval(this.#heartbeat);
     // Closing ends everything without reporting each open call as cancelled.
     this.#streams.clear();
     this.#closeEpoch(Number.MAX_SAFE_INTEGER);
-    this.#ready?.reject(new Error(`Connection closed before ready${code !== undefined ? ` (${code})` : ''}`));
+    this.#ready?.reject(new Error(`Connection closed before ready${code !== undefined ? ` (${code})` : ''}${reason ? `: ${reason}` : ''}`));
     this.#ready = undefined;
     void this.#stopAudio();
     this.#emitter.emit({ type: 'closed', ...(code !== undefined ? { code } : {}), ...(reason ? { reason } : {}) });
