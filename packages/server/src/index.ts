@@ -22,6 +22,7 @@ import {
   type Unsequenced,
   type WireAudioFormat,
 } from '@vrealtime/protocol';
+import { supportedCapabilities } from './capabilities.js';
 
 /**
  * The only socket surface the server needs. Runtimes with event-style sockets
@@ -86,8 +87,6 @@ const REFUSED = Symbol('refused');
 const FLUSH_INTERVAL_MS = 10;
 const OUTPUT = 2;
 const INPUT = 1;
-/** Optional protocol capabilities this server implements (spec/protocol.md §3). None yet. */
-const CAPABILITIES: ReadonlySet<string> = new Set();
 
 const systemClock: Clock = {
   now: () => performance.now(),
@@ -364,7 +363,7 @@ class SocketConnection implements Connection {
     const supported = this.hub.agent.model.capabilities;
     live.input = negotiate(hello.input, supported.input.formats);
     live.output = negotiate(hello.output, supported.output.formats);
-    live.capabilities = negotiateCapabilities(hello.capabilities, CAPABILITIES);
+    live.capabilities = negotiateCapabilities(hello.capabilities, this.hub.capabilities);
     try {
       const configured = (await this.hub.options.configure?.(principal, { context: hello.context })) ?? {};
       const session = await startSession(this.hub.agent, {
@@ -484,9 +483,12 @@ export class Hub {
   readonly clock: Clock;
   readonly highWaterMark: number;
   readonly heartbeatTimeoutMs: number;
+  /** Protocol capabilities sessions may negotiate: what this server implements and the agent's model supports. */
+  readonly capabilities: ReadonlySet<string>;
   readonly #sessions = new Map<string, LiveSession>();
 
   constructor(readonly agent: AgentDefinition, readonly options: AttachOptions = {}) {
+    this.capabilities = supportedCapabilities(agent.model.capabilities);
     this.clock = options.clock ?? systemClock;
     this.highWaterMark = options.highWaterMark ?? 256 * 1024;
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 45_000;
