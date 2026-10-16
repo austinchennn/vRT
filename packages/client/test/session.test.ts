@@ -158,6 +158,83 @@ describe('tool host', () => {
   });
 });
 
+describe('epoch gate races (#22 batch B)', () => {
+  const pcm = { encoding: 'pcm16', sampleRate: 24000 } as const;
+
+  it('never starts a call whose epoch closes between queueing and running', async () => {
+    const run = vi.fn();
+    const { session, socket, events } = await start({ tools: { fire: { parameters: {}, run } } });
+    // The interrupt lands in a microtask queued before the one that would start the tool.
+    session.on('tool.call', () => queueMicrotask(() => session.interrupt()));
+    socket.server({ type: 'turn.state', turnId: 't1', epoch: 1, state: 'acting' });
+    socket.server({ type: 'tool.call', callId: 'c1', epoch: 1, turnId: 't1', name: 'fire', arguments: {} });
+    await flush();
+    expect(run).not.toHaveBeenCalled();
+    expect(socket.ofType('tool.result')).toMatchObject([{ callId: 'c1', ok: false, code: 'INTERRUPTED', message: 'Interrupted before it started' }]);
+    expect(events.filter((e) => e.type === 'tool.result')).toHaveLength(1);
+  });
+
+  it('tells the app about a local interrupt at once, without waiting for the server', async () => {
+    const { session, socket, events } = await start();
+    socket.server({ type: 'turn.state', turnId: 't1', epoch: 2, state: 'speaking' });
+    session.interrupt('keyboard');
+    expect(events.at(-1)).toEqual({ type: 'interrupted', epoch: 2, source: 'local' });
+    expect(socket.ofType('interrupt')).toMatchObject([{ epoch: 2, reason: 'keyboard' }]);
+  });
+
+  it('reports each closed epoch once: the server confirming a local interrupt adds nothing', async () => {
+    const { session, socket, events } = await start();
+    socket.server({ type: 'turn.state', turnId: 't1', epoch: 2, state: 'speaking' });
+    session.interrupt();
+    session.interrupt();
+    socket.server({ type: 'interrupted', epoch: 2 });
+    socket.server({ type: 'interrupted', epoch: 3 });
+    expect(events.filter((e) => e.type === 'interrupted')).toEqual([
+      { type: 'interrupted', epoch: 2, source: 'local' },
+      { type: 'interrupted', epoch: 3, source: 'server' },
+    ]);
+  });
+
+  it('drops previews of closed epochs, including ones that arrive after the interrupt', async () => {
+    const { session, socket, events } = await start();
+    socket.server({ type: 'turn.state', turnId: 't1', epoch: 1, state: 'acting' });
+    socket.server({ type: 'tool.call.delta', callId: 'c1', epoch: 1, name: 'paint', preview: { argumentsDelta: '{"co' } });
+    session.interrupt();
+    socket.server({ type: 'tool.call.delta', callId: 'c1', epoch: 1, name: 'paint', preview: { argumentsDelta: 'lor"' } });
+    socket.server({ type: 'tool.call.delta', callId: 'c2', epoch: 2, name: 'paint', preview: { argumentsDelta: '{' } });
+    expect(events.filter((e) => e.type === 'tool.preview').map((e) => (e as { callId: string }).callId)).toEqual(['c1', 'c2']);
+  });
+
+  it('applies a preview or call resent after a reconnect only once', async () => {
+    const run = vi.fn();
+    const { socket, events } = await start({ tools: { paint: { parameters: {}, run } } });
+    const delta = { type: 'tool.call.delta', callId: 'c1', epoch: 1, name: 'paint', preview: { argumentsDelta: '{}' } } as const;
+    const call = { type: 'tool.call', callId: 'c1', epoch: 1, turnId: 't1', name: 'paint', arguments: {} } as const;
+    socket.server(delta, 1);
+    socket.server(call, 2);
+    await flush();
+    socket.drop(1006);
+    vi.advanceTimersByTime(250);
+    const second = latest();
+    second.open();
+    expect(second.ofType('hello')[0]).toMatchObject({ resumeFrom: 2 });
+    second.server({ type: 'ready', sessionId: 'sess', input: pcm, output: pcm, resumedFrom: 0 });
+    // A server that resends from an older point than the client reported: duplicates by seq.
+    second.server(delta, 1);
+    second.server(call, 2);
+    await flush();
+    expect(events.filter((e) => e.type === 'tool.preview')).toHaveLength(1);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not report an interruption when the session closes', async () => {
+    const { session, socket, events } = await start();
+    socket.server({ type: 'turn.state', turnId: 't1', epoch: 1, state: 'speaking' });
+    await session.close();
+    expect(events.some((e) => e.type === 'interrupted')).toBe(false);
+  });
+});
+
 describe('audio output', () => {
   function fakeSink() {
     const enqueued: [string, number[]][] = [];

@@ -15,26 +15,8 @@ import {
 import { createMicrophone, createSpeaker, type AudioSink, type AudioSource } from './audio.js';
 import { CLIENT_CAPABILITIES } from './capabilities.js';
 import { Emitter } from './emitter.js';
-
-export type FailureCode = 'INTERRUPTED' | 'REJECTED' | 'INVALID' | 'TIMEOUT' | 'FAILED';
-export type ToolOutcome = { ok: true; output: unknown } | { ok: false; code: FailureCode; message: string };
-
-export interface ClientToolContext {
-  /** Aborted when the call's turn is interrupted. */
-  signal: AbortSignal;
-  callId: string;
-  /** The agent turn that issued the call; group edits by it (e.g. undo a whole turn). */
-  turnId: string;
-  epoch: number;
-}
-
-/** A tool that runs in the app. Calls run one at a time, in arrival order. */
-export interface ClientTool {
-  description?: string;
-  /** JSON Schema for the arguments, as the model sees it. */
-  parameters: { readonly [key: string]: unknown };
-  run(args: any, context: ClientToolContext): unknown;
-}
+import { EpochGate } from './epoch-gate.js';
+import { ToolHost, type ClientTool, type PendingCall, type ToolOutcome } from './tool-host.js';
 
 /** The browser `WebSocket` surface the client uses. */
 export interface ClientSocket {
@@ -81,9 +63,18 @@ export type ClientEvent =
   | { type: 'transcript'; role: 'user' | 'agent'; itemId: string; text: string; final: boolean }
   | { type: 'text'; responseId: string; delta: string }
   | { type: 'tool.call'; callId: string; name: string; arguments: unknown; turnId: string; epoch: number }
+  /**
+   * Display-only progress of a call; never emitted for a closed epoch. Clear it on
+   * the call's `tool.result`, on an `interrupted` that covers its epoch, or on `closed`.
+   */
   | { type: 'tool.preview'; callId: string; name: string; epoch: number; preview: unknown }
   | { type: 'tool.result'; callId: string; name: string; turnId: string; epoch: number; result: ToolOutcome }
-  | { type: 'interrupted'; epoch: number }
+  /**
+   * `epoch` and every earlier epoch are closed: nothing from them takes effect any more.
+   * Emitted once per closure: at once inside `interrupt()` (`local`), or when the
+   * server interrupts on its own (`server`), never again when the server confirms.
+   */
+  | { type: 'interrupted'; epoch: number; source: 'local' | 'server' }
   | { type: 'error'; code: string; message: string; recoverable: boolean }
   | { type: 'reconnecting'; attempt: number; delayMs: number }
   | { type: 'closed'; code?: number; reason?: string };
@@ -96,14 +87,6 @@ const OFFERED: ReadonlySet<string> = new Set(CLIENT_CAPABILITIES);
 const ACK_EVERY = 32;
 const ACK_DELAY_MS = 250;
 
-interface PendingCall {
-  callId: string;
-  name: string;
-  args: unknown;
-  turnId: string;
-  epoch: number;
-}
-
 export class ClientSession {
   readonly #url: string;
   readonly #options: ConnectOptions;
@@ -113,13 +96,10 @@ export class ClientSession {
   #socket: ClientSocket | undefined;
   #sessionId: string | undefined;
   #state: TurnStateWire = 'idle';
-  #epoch = 0;
-  #closedEpoch = -1;
+  readonly #gate = new EpochGate();
+  readonly #tools: ToolHost;
   #audioItem: { id: string; epoch: number } | undefined;
   #audioSeq = 0;
-  #queue: PendingCall[] = [];
-  #current: { call: PendingCall; controller: AbortController } | undefined;
-  #pumping = false;
   #attempt = 0;
   #reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   #heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -139,6 +119,7 @@ export class ClientSession {
   constructor(url: string, options: ConnectOptions = {}) {
     this.#url = url;
     this.#options = options;
+    this.#tools = new ToolHost(options.tools ?? {}, this.#gate, (call, outcome) => this.#result(call, outcome));
   }
 
   get sessionId(): string | undefined {
@@ -149,8 +130,9 @@ export class ClientSession {
     return this.#state;
   }
 
+  /** The newest epoch seen from the server. */
   get epoch(): number {
-    return this.#epoch;
+    return this.#gate.observed;
   }
 
   /** Optional protocol features in effect for this session: offered by this client and confirmed in `ready`. */
@@ -185,13 +167,14 @@ export class ClientSession {
   }
 
   /**
-   * Stops the agent now: playback is flushed, the current epoch is closed
-   * locally (queued and later calls from it return INTERRUPTED without running;
-   * a running call is aborted) and the server is told.
+   * Stops the agent now, without waiting for the server: the current epoch is
+   * closed locally (queued and later calls from it return INTERRUPTED without
+   * running, a running call is aborted, its audio and previews are dropped),
+   * playback is flushed, `interrupted` is emitted, and then the server is told.
    */
   interrupt(reason: 'user' | 'keyboard' | 'speech' = 'user'): void {
-    const epoch = this.#epoch;
-    this.#closeEpoch(epoch);
+    const epoch = this.#gate.observed;
+    if (this.#closeEpoch(epoch)) this.#emitter.emit({ type: 'interrupted', epoch, source: 'local' });
     this.#send({ type: 'interrupt', epoch, reason });
   }
 
@@ -311,7 +294,7 @@ export class ClientSession {
     if (typeof data !== 'string') {
       const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data instanceof Uint8Array ? data : undefined;
       const frame = bytes && decodeAudioFrame(bytes);
-      if (frame?.kind === 2 && this.#audioItem && this.#audioItem.epoch > this.#closedEpoch) this.#speaker?.enqueue(this.#audioItem.id, frame.payload);
+      if (frame?.kind === 2 && this.#audioItem && !this.#gate.isClosed(this.#audioItem.epoch)) this.#speaker?.enqueue(this.#audioItem.id, frame.payload);
       return;
     }
     const decoded = decodeServerMessage(data);
@@ -331,7 +314,7 @@ export class ClientSession {
         void this.#onReady(message);
         return;
       case 'turn.state':
-        this.#seeEpoch(message.epoch);
+        this.#gate.observe(message.epoch);
         this.#state = message.state;
         // Barge-in: the user started talking, stop speaking right away.
         if (message.state === 'listening') void this.#flushPlayback();
@@ -344,18 +327,18 @@ export class ClientSession {
         this.#emitter.emit({ type: 'text', responseId: message.responseId, delta: message.delta });
         return;
       case 'audio.start':
-        this.#seeEpoch(message.epoch);
+        this.#gate.observe(message.epoch);
         this.#audioItem = { id: message.itemId, epoch: message.epoch };
         return;
       case 'tool.call.delta':
+        if (this.#gate.isClosed(message.epoch)) return;
         this.#emitter.emit({ type: 'tool.preview', callId: message.callId, name: message.name, epoch: message.epoch, preview: message.preview });
         return;
       case 'tool.call':
         this.#onToolCall({ callId: message.callId, name: message.name, args: message.arguments, turnId: message.turnId, epoch: message.epoch });
         return;
       case 'interrupted':
-        this.#closeEpoch(message.epoch);
-        this.#emitter.emit({ type: 'interrupted', epoch: message.epoch });
+        if (this.#closeEpoch(message.epoch)) this.#emitter.emit({ type: 'interrupted', epoch: message.epoch, source: 'server' });
         return;
       case 'ack':
         this.#outbox.ack(message.upTo);
@@ -415,53 +398,12 @@ export class ClientSession {
     this.#write(this.#outbox.stamp({ type: 'ack', upTo: this.#inbox.lastSeq }));
   }
 
-  // ── Tool host with the epoch gate ───────────────────────────────────────
-
-  #seeEpoch(epoch: number): void {
-    if (epoch > this.#epoch) this.#epoch = epoch;
-  }
+  // ── Tools and the epoch gate ────────────────────────────────────────────
 
   #onToolCall(call: PendingCall): void {
-    this.#seeEpoch(call.epoch);
+    this.#gate.observe(call.epoch);
     this.#emitter.emit({ type: 'tool.call', callId: call.callId, name: call.name, arguments: call.args, turnId: call.turnId, epoch: call.epoch });
-    if (call.epoch <= this.#closedEpoch) {
-      this.#result(call, { ok: false, code: 'INTERRUPTED', message: 'Interrupted before it started' });
-      return;
-    }
-    this.#queue.push(call);
-    void this.#pump();
-  }
-
-  async #pump(): Promise<void> {
-    if (this.#pumping) return;
-    this.#pumping = true;
-    try {
-      for (let call = this.#queue.shift(); call !== undefined; call = this.#queue.shift()) await this.#run(call);
-    } finally {
-      this.#pumping = false;
-    }
-  }
-
-  async #run(call: PendingCall): Promise<void> {
-    if (call.epoch <= this.#closedEpoch) {
-      this.#result(call, { ok: false, code: 'INTERRUPTED', message: 'Interrupted before it started' });
-      return;
-    }
-    const tool = this.#options.tools?.[call.name];
-    if (!tool) {
-      this.#result(call, { ok: false, code: 'FAILED', message: `Unknown client tool: ${call.name}` });
-      return;
-    }
-    const controller = new AbortController();
-    this.#current = { call, controller };
-    const aborted = new Promise<ToolOutcome>((resolve) =>
-      controller.signal.addEventListener('abort', () => resolve({ ok: false, code: 'INTERRUPTED', message: 'Interrupted while running' }), { once: true }));
-    const ran = Promise.resolve()
-      .then(() => tool.run(call.args, { signal: controller.signal, callId: call.callId, turnId: call.turnId, epoch: call.epoch }))
-      .then((output): ToolOutcome => ({ ok: true, output }), (error): ToolOutcome => ({ ok: false, code: 'FAILED', message: error instanceof Error ? error.message : String(error) }));
-    const result = await Promise.race([ran, aborted]);
-    this.#current = undefined;
-    this.#result(call, result);
+    this.#tools.submit(call);
   }
 
   #result(call: PendingCall, result: ToolOutcome): void {
@@ -472,14 +414,13 @@ export class ClientSession {
     this.#emitter.emit({ type: 'tool.result', callId: call.callId, name: call.name, turnId: call.turnId, epoch: call.epoch, result });
   }
 
-  #closeEpoch(epoch: number): void {
-    if (epoch > this.#closedEpoch) this.#closedEpoch = epoch;
-    if (this.#current && this.#current.call.epoch <= this.#closedEpoch) this.#current.controller.abort();
-    const stale = this.#queue.filter((call) => call.epoch <= this.#closedEpoch);
-    this.#queue = this.#queue.filter((call) => call.epoch > this.#closedEpoch);
-    for (const call of stale) this.#result(call, { ok: false, code: 'INTERRUPTED', message: 'Interrupted before it started' });
-    if (this.#audioItem && this.#audioItem.epoch <= this.#closedEpoch) this.#audioItem = undefined;
+  /** Closes `epoch` and earlier ones: none of their calls run and none of their audio plays. False when already closed. */
+  #closeEpoch(epoch: number): boolean {
+    if (!this.#gate.close(epoch)) return false;
+    this.#tools.cancelClosed();
+    if (this.#audioItem && this.#gate.isClosed(this.#audioItem.epoch)) this.#audioItem = undefined;
     void this.#flushPlayback();
+    return true;
   }
 
   // ── Audio ───────────────────────────────────────────────────────────────
