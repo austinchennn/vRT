@@ -76,6 +76,11 @@ describe('gemini connect', () => {
     });
   });
 
+  it('maps transcription language and vocabulary', async () => {
+    const { socket } = await connect({}, { inputTranscription: { language: 'zh-CN', vocabulary: ['vdoc', '第三章'] } });
+    expect(socket.sent[0]!['setup'].inputAudioTranscription).toEqual({ languageCodes: ['zh-CN'], customVocabulary: ['vdoc', '第三章'] });
+  });
+
   it('rejects when the socket closes before setupComplete', async () => {
     let socket!: MockSocket;
     const model = gemini({ apiKey: 'k', socket: (url) => (socket = new MockSocket(url)) });

@@ -32,6 +32,16 @@ const options = (socket: SocketFactory) => ({
   socket,
 });
 
+describe('sessionPayload', () => {
+  it('sends transcription vocabulary as the transcription prompt', async () => {
+    const { sessionPayload } = await import('../src/index.js');
+    expect(sessionPayload({ inputTranscription: { language: 'zh', vocabulary: ['vRealTime', '季度计划'] } }, { transcriptionModel: 't' })).toEqual({
+      type: 'realtime',
+      audio: { input: { transcription: { model: 't', language: 'zh', prompt: 'vRealTime, 季度计划' } } },
+    });
+  });
+});
+
 describe('fetchSocket', () => {
   it('upgrades over fetch with auth headers and accepts the socket', async () => {
     const socket = new OpenSocket();

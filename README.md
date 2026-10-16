@@ -69,6 +69,12 @@ MODEL=gemini GEMINI_API_KEY=your-key npm start -w examples/minimal
 MODEL=cascade OPENAI_API_KEY=your-key npm start -w examples/minimal
 ```
 
+```bash
+MODEL=cascade-claude ANTHROPIC_API_KEY=your-key OPENAI_API_KEY=your-key npm start -w examples/minimal
+```
+
+Cascade works with any text model the AI SDK supports (Claude, OpenAI, self-hosted OpenAI-compatible servers...) and any OpenAI-compatible speech endpoint (`openaiStt({ baseURL })`, `openaiTts({ baseURL })`). Session config `inputTranscription: { language, vocabulary }` biases recognition toward names and terms (for example words from the open document) on every model that supports it.
+
 No API key? `npm run start:fake -w examples/minimal` serves the same page with a scripted fake model.
 
 The browser side is a few lines with `@vrealtime/client` (see [examples/minimal/app.js](examples/minimal/app.js)):
@@ -107,7 +113,36 @@ const agent = defineAgent({ model: boson({ apiKey: env.BOSON_API_KEY, socket: fe
 export default { fetch: (request) => upgrade(agent, request) };
 ```
 
-Workers' `WebSocket` cannot send auth headers, so Boson and OpenAI connect through `fetchSocket()`. Inside a Durable Object, call `upgrade()` from its `fetch()`; sessions live in the object's memory, so route reconnects to the same object to resume.
+Workers' `WebSocket` cannot send auth headers, so Boson and OpenAI connect through `fetchSocket()`. Inside a Durable Object, call `upgrade()` from its `fetch()`; sessions live in the object's memory, so route reconnects to the same object to resume. [examples/workers](examples/workers) is a complete Worker with one Durable Object per document and token auth; `npm run test:workers` runs it in `wrangler dev` (workerd) against a mock Boson server.
+
+### Authentication
+
+Tokens go in the first message, never in the URL. The client takes a string or a function (called on every reconnect, so short-lived tokens can rotate); the server decides who is connected and configures the session for them:
+
+```ts
+connect(url, { auth: () => fetchShortLivedToken(), context: { docId } });
+
+serve(agent, {
+  authenticate: async ({ token, context, headers }) => verify(token, context),   // → { id, ... } or undefined to refuse
+  configure: (principal) => ({ instructions: `You edit ${principal?.docId}.` }),
+});
+```
+
+Tools and hooks see the principal as `context.data` / `info.data`; a session can only be resumed by the same principal.
+
+## Installing before the npm release
+
+Packages are not on npm yet (public release is M4). Build installable tarballs and add the ones you need to your app:
+
+```bash
+npm run pack
+```
+
+```bash
+npm i /path/to/vRT/release/vrealtime-core-0.1.0.tgz /path/to/vRT/release/vrealtime-protocol-0.1.0.tgz /path/to/vRT/release/vrealtime-openai-compatible-0.1.0.tgz /path/to/vRT/release/vrealtime-boson-0.1.0.tgz /path/to/vRT/release/vrealtime-server-0.1.0.tgz /path/to/vRT/release/vrealtime-client-0.1.0.tgz
+```
+
+Install each package together with the `@vrealtime/*` packages it depends on, as above. `npm run test:consumer` checks that the tarballs install into an empty project, import in Node and type-check with `moduleResolution` `bundler` and `nodenext`.
 
 ## Development
 

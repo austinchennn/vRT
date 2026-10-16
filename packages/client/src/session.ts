@@ -21,6 +21,8 @@ export interface ClientToolContext {
   /** Aborted when the call's turn is interrupted. */
   signal: AbortSignal;
   callId: string;
+  /** The agent turn that issued the call; group edits by it (e.g. undo a whole turn). */
+  turnId: string;
   epoch: number;
 }
 
@@ -56,6 +58,11 @@ export interface ConnectOptions {
   audio?: false | { input?: 'mic' | AudioSourceFactory | false; output?: 'speaker' | AudioSink | false };
   /** App context sent with `hello` (and later with `setContext`). */
   context?: unknown;
+  /**
+   * Token sent in `hello` (never in the URL). A function is called on every
+   * (re)connect, so short-lived tokens can be refreshed.
+   */
+  auth?: string | (() => string | Promise<string>);
   reconnect?: ReconnectOptions | false;
   /** Ping interval; the socket is considered dead after 2.5 intervals of silence. Default 15 s. */
   heartbeatMs?: number;
@@ -71,9 +78,9 @@ export type ClientEvent =
   | { type: 'state'; state: TurnStateWire; turnId: string; epoch: number }
   | { type: 'transcript'; role: 'user' | 'agent'; itemId: string; text: string; final: boolean }
   | { type: 'text'; responseId: string; delta: string }
-  | { type: 'tool.call'; callId: string; name: string; arguments: unknown; epoch: number }
+  | { type: 'tool.call'; callId: string; name: string; arguments: unknown; turnId: string; epoch: number }
   | { type: 'tool.preview'; callId: string; name: string; epoch: number; preview: unknown }
-  | { type: 'tool.result'; callId: string; name: string; epoch: number; result: ToolOutcome }
+  | { type: 'tool.result'; callId: string; name: string; turnId: string; epoch: number; result: ToolOutcome }
   | { type: 'interrupted'; epoch: number }
   | { type: 'error'; code: string; message: string; recoverable: boolean }
   | { type: 'reconnecting'; attempt: number; delayMs: number }
@@ -90,6 +97,7 @@ interface PendingCall {
   callId: string;
   name: string;
   args: unknown;
+  turnId: string;
   epoch: number;
 }
 
@@ -200,7 +208,7 @@ export class ClientSession {
     const socket = new Socket(this.#url);
     socket.binaryType = 'arraybuffer';
     this.#socket = socket;
-    socket.addEventListener('open', () => this.#hello());
+    socket.addEventListener('open', () => void this.#hello(socket));
     socket.addEventListener('message', (event) => {
       if (this.#socket === socket) this.#receive(event.data);
     });
@@ -209,7 +217,17 @@ export class ClientSession {
     });
   }
 
-  #hello(): void {
+  async #hello(socket: ClientSocket): Promise<void> {
+    let auth: string | undefined;
+    try {
+      const option = this.#options.auth;
+      auth = typeof option === 'function' ? await option() : option;
+    } catch (error) {
+      this.#emitter.emit({ type: 'error', code: 'AUTH_FAILED', message: error instanceof Error ? error.message : String(error), recoverable: false });
+      socket.close(4401, 'auth failed');
+      return;
+    }
+    if (this.#socket !== socket || socket.readyState !== OPEN) return;
     const tools = Object.entries(this.#options.tools ?? {}).map(([name, tool]) => ({ name, description: tool.description ?? '', parameters: tool.parameters }));
     const audio = this.#options.audio;
     const hello: Unsequenced<ClientMessage> = {
@@ -219,6 +237,7 @@ export class ClientSession {
       ...(audio && audio.output ? { output: PCM24 } : {}),
       ...(this.#sessionId !== undefined ? { sessionId: this.#sessionId, resumeFrom: this.#inbox.lastSeq } : {}),
       ...(this.#options.context !== undefined && !this.#everReady ? { context: this.#options.context } : {}),
+      ...(auth !== undefined ? { auth } : {}),
     };
     this.#write(this.#outbox.stamp(hello));
     this.#lastMessageAt = Date.now();
@@ -321,7 +340,7 @@ export class ClientSession {
         this.#emitter.emit({ type: 'tool.preview', callId: message.callId, name: message.name, epoch: message.epoch, preview: message.preview });
         return;
       case 'tool.call':
-        this.#onToolCall({ callId: message.callId, name: message.name, args: message.arguments, epoch: message.epoch });
+        this.#onToolCall({ callId: message.callId, name: message.name, args: message.arguments, turnId: message.turnId, epoch: message.epoch });
         return;
       case 'interrupted':
         this.#closeEpoch(message.epoch);
@@ -331,7 +350,8 @@ export class ClientSession {
         this.#outbox.ack(message.upTo);
         return;
       case 'error':
-        if (message.code === 'RESUME_FAILED') this.#giveUp = true;
+        // Retrying cannot help with these, unless a token function can fetch a fresh token.
+        if (message.code === 'RESUME_FAILED' || (message.code === 'UNAUTHORIZED' && typeof this.#options.auth !== 'function')) this.#giveUp = true;
         if (!message.recoverable && this.#ready) {
           this.#ready.reject(new Error(`${message.code}: ${message.message}`));
           this.#ready = undefined;
@@ -390,7 +410,7 @@ export class ClientSession {
 
   #onToolCall(call: PendingCall): void {
     this.#seeEpoch(call.epoch);
-    this.#emitter.emit({ type: 'tool.call', callId: call.callId, name: call.name, arguments: call.args, epoch: call.epoch });
+    this.#emitter.emit({ type: 'tool.call', callId: call.callId, name: call.name, arguments: call.args, turnId: call.turnId, epoch: call.epoch });
     if (call.epoch <= this.#closedEpoch) {
       this.#result(call, { ok: false, code: 'INTERRUPTED', message: 'Interrupted before it started' });
       return;
@@ -424,7 +444,7 @@ export class ClientSession {
     const aborted = new Promise<ToolOutcome>((resolve) =>
       controller.signal.addEventListener('abort', () => resolve({ ok: false, code: 'INTERRUPTED', message: 'Interrupted while running' }), { once: true }));
     const ran = Promise.resolve()
-      .then(() => tool.run(call.args, { signal: controller.signal, callId: call.callId, epoch: call.epoch }))
+      .then(() => tool.run(call.args, { signal: controller.signal, callId: call.callId, turnId: call.turnId, epoch: call.epoch }))
       .then((output): ToolOutcome => ({ ok: true, output }), (error): ToolOutcome => ({ ok: false, code: 'FAILED', message: error instanceof Error ? error.message : String(error) }));
     const result = await Promise.race([ran, aborted]);
     this.#current = undefined;
@@ -435,7 +455,7 @@ export class ClientSession {
     this.#send(result.ok
       ? { type: 'tool.result', callId: call.callId, epoch: call.epoch, ok: true, output: result.output }
       : { type: 'tool.result', callId: call.callId, epoch: call.epoch, ok: false, code: result.code, message: result.message });
-    this.#emitter.emit({ type: 'tool.result', callId: call.callId, name: call.name, epoch: call.epoch, result });
+    this.#emitter.emit({ type: 'tool.result', callId: call.callId, name: call.name, turnId: call.turnId, epoch: call.epoch, result });
   }
 
   #closeEpoch(epoch: number): void {

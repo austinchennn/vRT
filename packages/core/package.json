@@ -1,10 +1,25 @@
 {
   "name": "@vrealtime/core",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "vRealTime core: realtime model interface, normalized events and the agent runtime with interrupt guarantees",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/austinchennn/vRT.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/austinchennn/vRT#readme",
+  "bugs": "https://github.com/austinchennn/vRT/issues",
+  "keywords": [
+    "realtime",
+    "voice",
+    "agent",
+    "websocket",
+    "vrealtime"
+  ],
   "type": "module",
   "sideEffects": false,
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "@vrealtime/source": "./src/index.ts",
@@ -15,6 +30,12 @@
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   }

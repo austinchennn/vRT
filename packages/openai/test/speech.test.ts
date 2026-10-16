@@ -35,6 +35,9 @@ describe('openai speech', () => {
     const form = init.body as FormData;
     expect(form.get('model')).toBe('gpt-4o-transcribe');
     expect(form.get('language')).toBe('en');
+    expect(form.get('prompt')).toBeNull();
+    await stt.transcribe(new Uint8Array(320), pcm16k, { signal: new AbortController().signal, vocabulary: ['vdoc', 'TipTap'] });
+    expect((fetchImpl.mock.calls[1]![1].body as FormData).get('prompt')).toBe('vdoc, TipTap');
     expect((form.get('file') as File).size).toBe(364);
   });
 

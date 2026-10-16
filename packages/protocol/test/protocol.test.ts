@@ -18,7 +18,7 @@ const env = { v: 1 as const, seq: 7 };
 const pcm = { encoding: 'pcm16' as const, sampleRate: 24000 };
 
 const clientMessages: ClientMessage[] = [
-  { ...env, type: 'hello', tools: [{ name: 'paint', description: 'd', parameters: { type: 'object' } }], input: pcm, output: { encoding: 'opus' }, sessionId: 's1', resumeFrom: 3, context: { doc: 1 } },
+  { ...env, type: 'hello', tools: [{ name: 'paint', description: 'd', parameters: { type: 'object' } }], input: pcm, output: { encoding: 'opus' }, sessionId: 's1', resumeFrom: 3, context: { doc: 1 }, auth: 'token-abc' },
   { ...env, type: 'hello', tools: [] },
   { ...env, type: 'text', text: 'hi' },
   { ...env, type: 'interrupt', epoch: 4, reason: 'keyboard' },
@@ -158,5 +158,8 @@ describe('sequencing', () => {
     expect(inbox.accept({ type: 'text', seq: 3 })).toBe(true);
     expect(inbox.lastSeq).toBe(3);
     expect(new Inbox(10).accept({ type: 'text', seq: 9 })).toBe(false);
+    // Errors sent before a session exists carry seq 0 and must never be dropped.
+    expect(inbox.accept({ type: 'error', seq: 0 })).toBe(true);
+    expect(inbox.accept({ type: 'error', seq: 0 })).toBe(true);
   });
 });

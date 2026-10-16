@@ -114,6 +114,17 @@ describe('cascade', () => {
     expect(requests[0]!.messages).toEqual([{ role: 'user', content: 'what time is it' }]);
   });
 
+  it('passes transcription vocabulary to the stt', async () => {
+    const recognizer = stt('open chapter three');
+    const { llm } = scriptedLlm([() => [{ type: 'text', delta: 'Opening it now, one moment.' }]]);
+    const model = cascade({ llm, stt: recognizer, tts: fakeTts() });
+    const session = await model.connect({ inputTranscription: { language: 'en', vocabulary: ['vdoc', 'Q3 plan'] } });
+    session.sendAudio(tone(9000));
+    session.commitAudio();
+    await vi.waitFor(() => expect(recognizer.transcribe).toHaveBeenCalled());
+    expect((recognizer.transcribe as ReturnType<typeof vi.fn>).mock.calls[0]![2]).toMatchObject({ language: 'en', vocabulary: ['vdoc', 'Q3 plan'] });
+  });
+
   it('round-trips a tool call: the result feeds the next request', async () => {
     const { llm, requests } = scriptedLlm([
       () => [{ type: 'tool-call-delta', callId: 'c1', name: 'weather', argumentsDelta: '{"city"' }, { type: 'tool-call', callId: 'c1', name: 'weather', arguments: { city: 'Paris' } }],

@@ -28,7 +28,7 @@ type Pcm16Format = Extract<AudioFormat, { encoding: 'pcm16' }>;
 export interface SttModel {
   /** Preferred input rate; audio is resampled to it. Default 16 kHz. */
   readonly sampleRate?: Pcm16Rate;
-  transcribe(audio: Uint8Array, format: Pcm16Format, options: { signal: AbortSignal; language?: string }): Promise<string>;
+  transcribe(audio: Uint8Array, format: Pcm16Format, options: { signal: AbortSignal; language?: string; vocabulary?: readonly string[] }): Promise<string>;
 }
 
 export type ChatMessage =
@@ -295,9 +295,11 @@ export class CascadeSession implements RealtimeSession {
     if (!stt || audio.byteLength === 0) return;
     const itemId = `cascade-user-${++this.#userCount}`;
     this.#after(async () => {
+      const transcription = typeof this.#config.inputTranscription === 'object' ? this.#config.inputTranscription : {};
       const text = (await stt.transcribe(audio, this.#inputFormat, {
         signal: this.#lifetime.signal,
-        ...(typeof this.#config.inputTranscription === 'object' && this.#config.inputTranscription.language ? { language: this.#config.inputTranscription.language } : {}),
+        ...(transcription.language ? { language: transcription.language } : {}),
+        ...(transcription.vocabulary?.length ? { vocabulary: transcription.vocabulary } : {}),
       })).trim();
       if (this.#closed || !text) return;
       this.#emit({ type: 'input.transcript', itemId, text, final: true });

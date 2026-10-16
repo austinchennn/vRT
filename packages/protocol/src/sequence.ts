@@ -68,9 +68,13 @@ export class Inbox {
     return this.#lastSeq;
   }
 
-  /** True when the message is new and should be handled. */
+  /**
+   * True when the message is new and should be handled. `seq: 0` marks a message
+   * outside the resumable stream (transient types, or errors sent before a session
+   * exists): always handled, never deduplicated.
+   */
   accept(message: { type: string; seq: number }): boolean {
-    if (TRANSIENT_TYPES.has(message.type)) return true;
+    if (message.seq === 0 || TRANSIENT_TYPES.has(message.type)) return true;
     if (message.seq <= this.#lastSeq) return false;
     this.#lastSeq = message.seq;
     return true;

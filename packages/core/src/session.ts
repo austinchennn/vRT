@@ -55,6 +55,8 @@ export interface StartSessionOptions {
   clientTools?: readonly ToolSpec[];
   /** Extra session config, e.g. the audio formats an edge negotiated. */
   config?: Partial<SessionConfig>;
+  /** Attached to the session for tools and hooks, e.g. the authenticated principal. */
+  data?: unknown;
   signal?: AbortSignal;
   clock?: Clock;
 }
@@ -110,6 +112,8 @@ export function toModelOutput(result: ToolResult): unknown {
 export class AgentSession {
   readonly agent: AgentDefinition;
   readonly capabilities: Capabilities;
+  /** Data the edge attached (e.g. the authenticated principal); passed to tools and hooks. */
+  readonly data: unknown;
   readonly #model: RealtimeSession;
   readonly #clock: Clock;
   readonly #emitter: Emitter<AgentEvent>;
@@ -147,8 +151,9 @@ export class AgentSession {
   readonly #turnAgentItems = new Set<string>();
   #closed = false;
 
-  constructor(agent: AgentDefinition, model: RealtimeSession, options: { clientTools?: readonly ToolSpec[]; clock?: Clock } = {}) {
+  constructor(agent: AgentDefinition, model: RealtimeSession, options: { clientTools?: readonly ToolSpec[]; clock?: Clock; data?: unknown } = {}) {
     this.agent = agent;
+    this.data = options.data;
     this.#model = model;
     this.capabilities = model.capabilities;
     this.#clock = options.clock ?? systemClock;
@@ -486,6 +491,7 @@ export class AgentSession {
       callId: record.callId,
       turnId: record.turn.id,
       epoch: record.epoch,
+      data: this.data,
       emit: (preview: unknown) => {
         if (record.status === 'running') this.#emitter.emit({ type: 'tool.preview', callId: record.callId, epoch: record.epoch, name: record.name, preview });
       },
@@ -664,7 +670,7 @@ export class AgentSession {
   }
 
   #callInfo(record: CallRecord): ToolCallInfo {
-    return { callId: record.callId, name: record.name, arguments: record.args, where: record.where, risk: record.tool?.risk ?? 'low', turn: record.turn };
+    return { callId: record.callId, name: record.name, arguments: record.args, where: record.where, risk: record.tool?.risk ?? 'low', turn: record.turn, data: this.data };
   }
 
   #hook(run: () => void): void {

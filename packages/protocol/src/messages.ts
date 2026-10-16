@@ -16,8 +16,11 @@ export const AUDIO_HEADER_BYTES = 5;
 interface Envelope { v: typeof PROTOCOL_VERSION; seq: number }
 
 export type ClientMessage = Envelope & (
-  /** `sessionId` + `resumeFrom` (the last server seq the client handled) resume a session after a reconnect. */
-  | { type: 'hello'; tools: WireToolSpec[]; input?: WireAudioFormat; output?: WireAudioFormat; sessionId?: string; resumeFrom?: number; context?: unknown }
+  /**
+   * `sessionId` + `resumeFrom` (the last server seq the client handled) resume a session after a reconnect.
+   * `auth` (v1.1) carries a short-lived token in the first message instead of the URL.
+   */
+  | { type: 'hello'; tools: WireToolSpec[]; input?: WireAudioFormat; output?: WireAudioFormat; sessionId?: string; resumeFrom?: number; context?: unknown; auth?: string }
   | { type: 'text'; text: string }
   | { type: 'interrupt'; epoch: number; reason: 'speech' | 'user' | 'keyboard' }
   | { type: 'playback'; itemId: string; playedMs: number }

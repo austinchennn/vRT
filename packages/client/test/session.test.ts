@@ -96,6 +96,14 @@ describe('connect', () => {
     expect(session.connected).toBe(true);
   });
 
+  it('surfaces an error sent before any session exists (seq 0)', async () => {
+    const pending = connect('ws://test', { WebSocket: FakeSocket as never });
+    latest().open();
+    latest().server({ type: 'error', code: 'UNAUTHORIZED', message: 'bad token', recoverable: false }, 0);
+    latest().drop(4401);
+    await expect(pending).rejects.toThrow('UNAUTHORIZED: bad token');
+  });
+
   it('rejects when the socket closes before ready or the server refuses', async () => {
     const pending = connect('ws://test', { WebSocket: FakeSocket as never });
     latest().drop(1006);
@@ -162,7 +170,8 @@ describe('tool host', () => {
 
     socket.server({ type: 'tool.call', callId: 'c4', epoch: 4, turnId: 't2', name: 'fast', arguments: { n: 1 } });
     await flush();
-    expect(run).toHaveBeenCalledWith({ n: 1 }, expect.objectContaining({ callId: 'c4', epoch: 4 }));
+    expect(run).toHaveBeenCalledWith({ n: 1 }, expect.objectContaining({ callId: 'c4', turnId: 't2', epoch: 4 }));
+    expect(events.filter((e) => e.type === 'tool.result').at(-1)).toMatchObject({ callId: 'c4', turnId: 't2' });
   });
 
   it('a server interrupted message closes the epoch too', async () => {
@@ -229,6 +238,40 @@ describe('audio output', () => {
     push!(new Uint8Array([7, 7]));
     const frame = socket.sent.find((d): d is Uint8Array => typeof d !== 'string')!;
     expect(decodeAudioFrame(frame)).toMatchObject({ kind: 1, seq: 0 });
+  });
+});
+
+describe('authentication', () => {
+  it('sends the token in hello and calls a token function on every connect', async () => {
+    let n = 0;
+    const { socket } = await start({ auth: async () => `token-${++n}` });
+    await flush();
+    expect(socket.ofType('hello')[0]).toMatchObject({ auth: 'token-1' });
+    socket.drop(1006);
+    vi.advanceTimersByTime(250);
+    latest().open();
+    await flush();
+    expect(latest().ofType('hello')[0]).toMatchObject({ auth: 'token-2', sessionId: 'sess' });
+  });
+
+  it('gives up reconnecting on UNAUTHORIZED with a fixed token', async () => {
+    const { socket, events } = await start({ auth: 'static' });
+    socket.drop(1006);
+    vi.advanceTimersByTime(250);
+    latest().open();
+    await flush();
+    latest().server({ type: 'error', code: 'UNAUTHORIZED', message: 'expired', recoverable: false });
+    latest().drop(4401);
+    vi.advanceTimersByTime(10_000);
+    expect(events.at(-1)).toMatchObject({ type: 'closed', code: 4401 });
+    expect(FakeSocket.instances).toHaveLength(2);
+  });
+
+  it('fails the connection when the token function throws', async () => {
+    const pending = connect('ws://test', { WebSocket: FakeSocket as never, auth: () => { throw new Error('no session'); } });
+    latest().open();
+    await expect(pending).rejects.toThrow(/before ready/);
+    expect(latest().closedWith).toEqual([4401, 'auth failed']);
   });
 });
 

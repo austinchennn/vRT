@@ -68,7 +68,13 @@ export function setupMessage(model: string, config: SessionConfig): Json {
     setup['tools'] = [{ functionDeclarations: config.tools.map((t) => ({ name: t.name, description: t.description, parametersJsonSchema: t.parameters })) }];
   }
   setup['realtimeInputConfig'] = { automaticActivityDetection: { disabled: config.turnDetection === null } };
-  if (config.inputTranscription !== false) setup['inputAudioTranscription'] = {};
+  if (config.inputTranscription !== false) {
+    const t = config.inputTranscription;
+    setup['inputAudioTranscription'] = {
+      ...(typeof t === 'object' && t.language ? { languageCodes: [t.language] } : {}),
+      ...(typeof t === 'object' && t.vocabulary?.length ? { customVocabulary: [...t.vocabulary] } : {}),
+    };
+  }
   if (config.modalities !== 'text') setup['outputAudioTranscription'] = {};
   return { setup };
 }

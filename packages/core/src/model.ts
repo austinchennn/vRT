@@ -29,7 +29,8 @@ export interface SessionConfig {
   modalities?: 'audio' | 'text';
   inputFormat?: AudioFormat;
   outputFormat?: AudioFormat;
-  inputTranscription?: boolean | { language?: string };
+  /** `vocabulary`: names and terms to bias recognition toward (e.g. words from the open document). */
+  inputTranscription?: boolean | { language?: string; vocabulary?: readonly string[] };
   temperature?: number;
 }
 

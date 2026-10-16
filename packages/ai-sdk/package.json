@@ -1,10 +1,25 @@
 {
   "name": "@vrealtime/ai-sdk",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Vercel AI SDK language models as vRealTime cascade text models",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/austinchennn/vRT.git",
+    "directory": "packages/ai-sdk"
+  },
+  "homepage": "https://github.com/austinchennn/vRT#readme",
+  "bugs": "https://github.com/austinchennn/vRT/issues",
+  "keywords": [
+    "realtime",
+    "voice",
+    "agent",
+    "websocket",
+    "vrealtime"
+  ],
   "type": "module",
   "sideEffects": false,
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "@vrealtime/source": "./src/index.ts",
@@ -15,11 +30,17 @@
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@vrealtime/cascade": "0.0.0"
+    "@vrealtime/cascade": "0.1.0"
   },
   "peerDependencies": {
     "ai": ">=7.0.0"
