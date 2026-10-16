@@ -70,12 +70,13 @@ export function openaiStt(options: SttOptions = {}) {
   const model = options.model ?? 'gpt-4o-transcribe';
   return {
     sampleRate: 16000 as const,
-    async transcribe(audio: Uint8Array, format: Pcm16Format, call: { signal: AbortSignal; language?: string }): Promise<string> {
+    async transcribe(audio: Uint8Array, format: Pcm16Format, call: { signal: AbortSignal; language?: string; vocabulary?: readonly string[] }): Promise<string> {
       const form = new FormData();
       form.append('file', new Blob([pcm16ToWav(audio, format.sampleRate) as Uint8Array<ArrayBuffer>], { type: 'audio/wav' }), 'audio.wav');
       form.append('model', model);
       const language = call.language ?? options.language;
       if (language) form.append('language', language);
+      if (call.vocabulary?.length) form.append('prompt', call.vocabulary.join(', '));
       const response = await fetchImpl(`${baseURL}/audio/transcriptions`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal: call.signal });
       if (!response.ok) throw await failure(response, 'transcription');
       const json = (await response.json()) as { text?: string };

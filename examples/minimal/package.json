@@ -10,6 +10,7 @@
     "start:fake": "node build.mjs && node fake-server.js"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.81",
     "@ai-sdk/openai": "4.0.95",
     "@vrealtime/ai-sdk": "0.1.0",
     "@vrealtime/boson": "0.1.0",

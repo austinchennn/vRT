@@ -105,7 +105,11 @@ export function sessionPayload(config: Partial<SessionConfig>, options: { model?
   }
   if (config.inputTranscription !== undefined) {
     const { inputTranscription: t } = config;
-    input['transcription'] = t === false ? null : { model: options.transcriptionModel, ...(typeof t === 'object' && t.language ? { language: t.language } : {}) };
+    input['transcription'] = t === false ? null : {
+      model: options.transcriptionModel,
+      ...(typeof t === 'object' && t.language ? { language: t.language } : {}),
+      ...(typeof t === 'object' && t.vocabulary?.length ? { prompt: t.vocabulary.join(', ') } : {}),
+    };
   }
   const output: Record<string, unknown> = {};
   if (config.outputFormat !== undefined) output['format'] = wireFormat(config.outputFormat);

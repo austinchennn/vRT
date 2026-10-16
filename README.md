@@ -50,6 +50,12 @@ MODEL=gemini GEMINI_API_KEY=your-key npm start -w examples/minimal
 MODEL=cascade OPENAI_API_KEY=your-key npm start -w examples/minimal
 ```
 
+```bash
+MODEL=cascade-claude ANTHROPIC_API_KEY=your-key OPENAI_API_KEY=your-key npm start -w examples/minimal
+```
+
+Cascade works with any text model the AI SDK supports (Claude, OpenAI, self-hosted OpenAI-compatible servers...) and any OpenAI-compatible speech endpoint (`openaiStt({ baseURL })`, `openaiTts({ baseURL })`). Session config `inputTranscription: { language, vocabulary }` biases recognition toward names and terms (for example words from the open document) on every model that supports it.
+
 No API key? `npm run start:fake -w examples/minimal` serves the same page with a scripted fake model.
 
 The browser side is a few lines with `@vrealtime/client` (see [examples/minimal/app.js](examples/minimal/app.js)):
