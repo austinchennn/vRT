@@ -243,6 +243,13 @@ export class AgentSession {
     const closedEpoch = this.#epoch;
     this.#epoch++;
 
+    // Decide what belongs to the closed epoch before calling into the model: a model may
+    // end its response synchronously inside cancel(), and that must not hide anything here.
+    const interruptedItems = [...this.#audioItems].filter(([, item]) => this.#responses.get(item.responseId)?.epoch === closedEpoch).map(([itemId]) => itemId);
+    const interruptedCalls = [...this.#calls.values()].filter(
+      (record) => record.epoch === closedEpoch && record.status !== 'settled' && !(record.status === 'running' && record.tool?.async),
+    );
+
     const responseId = this.#openResponse;
     if (responseId !== undefined) {
       this.#openResponse = undefined;
@@ -252,16 +259,11 @@ export class AgentSession {
     }
     this.#awaitingResponse = false;
 
-    for (const [itemId, item] of this.#audioItems) {
-      if (this.#responses.get(item.responseId)?.epoch === closedEpoch) {
-        this.#interruptedItems.add(itemId);
-        this.#truncate(itemId);
-      }
+    for (const itemId of interruptedItems) {
+      this.#interruptedItems.add(itemId);
+      this.#truncate(itemId);
     }
-
-    for (const record of this.#calls.values()) {
-      if (record.epoch !== closedEpoch || record.status === 'settled') continue;
-      if (record.status === 'running' && record.tool?.async) continue;
+    for (const record of interruptedCalls) {
       record.controller.abort(new Error('Interrupted'));
       this.#settle(record, { ok: false, code: 'INTERRUPTED', message: `Interrupted by ${reason}` });
     }
