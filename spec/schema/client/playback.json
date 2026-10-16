@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/client/playback.json",
+  "title": "playback",
+  "description": "How much of an output audio item the user actually heard, reported after playback stops early (protocol.md §8.4).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sequencedEnvelope" }],
+  "properties": {
+    "type": { "const": "playback" },
+    "itemId": { "$ref": "../common.json#/$defs/identifier", "description": "The itemId of the audio.start that announced the item." },
+    "playedMs": { "type": "number", "minimum": 0, "description": "Milliseconds of the item that were played." }
+  },
+  "required": ["type", "itemId", "playedMs"]
+}

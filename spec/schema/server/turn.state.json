@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/server/turn.state.json",
+  "title": "turn.state",
+  "description": "The agent's turn changed state (protocol.md §6.1).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sequencedEnvelope" }],
+  "properties": {
+    "type": { "const": "turn.state" },
+    "turnId": { "$ref": "../common.json#/$defs/identifier" },
+    "epoch": { "$ref": "../common.json#/$defs/epoch" },
+    "state": { "$ref": "../common.json#/$defs/turnState" }
+  },
+  "required": ["type", "turnId", "epoch", "state"]
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "client",
+  "description": "The context message (protocol.md §5.5).",
+  "cases": [
+    { "id": "client/context/object", "description": "Application data.", "valid": true, "message": { "v": 1, "seq": 7, "type": "context", "context": { "doc": "q3-plan", "selection": ["block-4"] } } },
+    { "id": "client/context/null", "description": "null clears the context.", "valid": true, "message": { "v": 1, "seq": 7, "type": "context", "context": null } },
+    { "id": "client/context/missing", "description": "The context member is required; send null to clear it.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 7, "type": "context" } }
+  ]
+}

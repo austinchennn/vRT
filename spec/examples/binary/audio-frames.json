@@ -1,0 +1,16 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "audio",
+  "description": "Binary audio frames: [kind u8][seq u32 big-endian][payload] (protocol.md §8.1). These vectors check frame structure only; which kinds a peer may send is a session rule (§8.1).",
+  "cases": [
+    { "id": "audio/frame/input-empty-payload", "description": "A header with no payload is structurally valid.", "bytes": "0100000000", "valid": true, "frame": { "kind": 1, "seq": 0, "payload": "" } },
+    { "id": "audio/frame/input-pcm", "description": "Input audio; the sequence number is big-endian.", "bytes": "0101020304feff0100", "valid": true, "frame": { "kind": 1, "seq": 16909060, "payload": "feff0100" } },
+    { "id": "audio/frame/output-max-seq", "description": "Output audio with the largest sequence number.", "bytes": "02ffffffff0a0b0c", "valid": true, "frame": { "kind": 2, "seq": 4294967295, "payload": "0a0b0c" } },
+    { "id": "audio/frame/empty", "description": "No bytes at all.", "bytes": "", "valid": false },
+    { "id": "audio/frame/kind-only", "description": "One byte.", "bytes": "01", "valid": false },
+    { "id": "audio/frame/short-header", "description": "Four bytes: one short of a header.", "bytes": "01000000", "valid": false },
+    { "id": "audio/frame/kind-zero", "description": "Kind 0 is not defined.", "bytes": "0000000001aa", "valid": false },
+    { "id": "audio/frame/kind-three", "description": "Kind 3 is not defined.", "bytes": "0300000001aa", "valid": false },
+    { "id": "audio/frame/kind-ff", "description": "Kind 255 is not defined.", "bytes": "ff00000001", "valid": false }
+  ]
+}

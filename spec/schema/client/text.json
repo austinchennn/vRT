@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/client/text.json",
+  "title": "text",
+  "description": "User text input. Starts a response, interrupting the one in flight (protocol.md §6.3).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sequencedEnvelope" }],
+  "properties": {
+    "type": { "const": "text" },
+    "text": { "type": "string" }
+  },
+  "required": ["type", "text"]
+}

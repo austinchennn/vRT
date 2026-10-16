@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/server/error.json",
+  "title": "error",
+  "description": "Something went wrong (protocol.md §9). seq is 0 when no session exists yet (for example UNAUTHORIZED or RESUME_FAILED).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sessionlessEnvelope" }],
+  "properties": {
+    "type": { "const": "error" },
+    "code": { "$ref": "../common.json#/$defs/errorCode" },
+    "message": { "type": "string", "description": "Human-readable; never parsed." },
+    "recoverable": { "type": "boolean", "description": "False when the session or connection cannot continue." }
+  },
+  "required": ["type", "code", "message", "recoverable"]
+}

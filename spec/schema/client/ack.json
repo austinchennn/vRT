@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/client/ack.json",
+  "title": "ack (client)",
+  "description": "The client has handled every server message up to and including seq upTo (protocol.md §4.2).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/transientEnvelope" }],
+  "properties": {
+    "type": { "const": "ack" },
+    "upTo": { "$ref": "../common.json#/$defs/uint32" }
+  },
+  "required": ["type", "upTo"]
+}

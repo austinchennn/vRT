@@ -1,0 +1,14 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "server",
+  "description": "Framing and envelope rules that apply to every server message (protocol.md §9.1).",
+  "cases": [
+    { "id": "server/envelope/invalid-json", "description": "A text frame that is not JSON.", "valid": false, "error": "MALFORMED", "raw": "not json" },
+    { "id": "server/envelope/number", "description": "JSON that is not an object.", "valid": false, "error": "MALFORMED", "message": 1 },
+    { "id": "server/envelope/version-0", "description": "Another major version.", "valid": false, "error": "UNSUPPORTED_VERSION", "message": { "v": 0, "seq": 0, "type": "pong" } },
+    { "id": "server/envelope/type-client-only", "description": "A client message type sent by a server.", "valid": false, "error": "UNKNOWN_TYPE", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [] } },
+    { "id": "server/envelope/type-proto", "description": "Type names are matched exactly, never looked up as object keys.", "valid": false, "error": "UNKNOWN_TYPE", "message": { "v": 1, "seq": 1, "type": "__proto__" } },
+    { "id": "server/envelope/seq-missing", "description": "No sequence number.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "type": "interrupted", "epoch": 1 } }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/server-message.json",
+  "title": "vRT protocol v1: server message",
+  "description": "Any JSON control message a server may send. The type member selects the message schema.",
+  "type": "object",
+  "properties": {
+    "type": { "enum": ["ready", "audio.start", "turn.state", "transcript", "text", "tool.call.delta", "tool.call", "interrupted", "ack", "pong", "error"] }
+  },
+  "required": ["type"],
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "ready" } }, "required": ["type"] }, "then": { "$ref": "server/ready.json" } },
+    { "if": { "properties": { "type": { "const": "audio.start" } }, "required": ["type"] }, "then": { "$ref": "server/audio.start.json" } },
+    { "if": { "properties": { "type": { "const": "turn.state" } }, "required": ["type"] }, "then": { "$ref": "server/turn.state.json" } },
+    { "if": { "properties": { "type": { "const": "transcript" } }, "required": ["type"] }, "then": { "$ref": "server/transcript.json" } },
+    { "if": { "properties": { "type": { "const": "text" } }, "required": ["type"] }, "then": { "$ref": "server/text.json" } },
+    { "if": { "properties": { "type": { "const": "tool.call.delta" } }, "required": ["type"] }, "then": { "$ref": "server/tool.call.delta.json" } },
+    { "if": { "properties": { "type": { "const": "tool.call" } }, "required": ["type"] }, "then": { "$ref": "server/tool.call.json" } },
+    { "if": { "properties": { "type": { "const": "interrupted" } }, "required": ["type"] }, "then": { "$ref": "server/interrupted.json" } },
+    { "if": { "properties": { "type": { "const": "ack" } }, "required": ["type"] }, "then": { "$ref": "server/ack.json" } },
+    { "if": { "properties": { "type": { "const": "pong" } }, "required": ["type"] }, "then": { "$ref": "server/pong.json" } },
+    { "if": { "properties": { "type": { "const": "error" } }, "required": ["type"] }, "then": { "$ref": "server/error.json" } }
+  ]
+}

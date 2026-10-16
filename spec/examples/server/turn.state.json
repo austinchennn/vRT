@@ -1,0 +1,12 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "server",
+  "description": "The turn.state message (protocol.md §6.1).",
+  "cases": [
+    { "id": "server/turn.state/listening", "description": "The user is talking.", "valid": true, "message": { "v": 1, "seq": 1, "type": "turn.state", "turnId": "turn-1", "epoch": 1, "state": "listening" } },
+    { "id": "server/turn.state/acting", "description": "A tool is running.", "valid": true, "message": { "v": 1, "seq": 4, "type": "turn.state", "turnId": "turn-1", "epoch": 1, "state": "acting" } },
+    { "id": "server/turn.state/state-unknown", "description": "Turn states are a closed set.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 4, "type": "turn.state", "turnId": "turn-1", "epoch": 1, "state": "paused" } },
+    { "id": "server/turn.state/seq-zero", "description": "turn.state is sequenced.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "turn.state", "turnId": "turn-1", "epoch": 1, "state": "idle" } }
+  ]
+}

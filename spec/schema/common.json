@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/common.json",
+  "title": "vRT protocol v1: shared definitions",
+  "description": "Definitions referenced by every message schema. See spec/protocol.md for the normative semantics.",
+  "$defs": {
+    "uint32": {
+      "description": "An unsigned 32-bit integer.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "positiveUint32": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "identifier": {
+      "description": "An opaque, non-empty identifier. Receivers compare identifiers byte for byte and never parse them.",
+      "type": "string",
+      "minLength": 1
+    },
+    "epoch": {
+      "description": "The interrupt epoch a message belongs to (protocol.md §6).",
+      "$ref": "#/$defs/uint32"
+    },
+    "json": {
+      "description": "Any JSON value, including null. The member itself must be present."
+    },
+    "transientEnvelope": {
+      "description": "Envelope of a per-connection message: never resent, never deduplicated, always seq 0 (protocol.md §4.1).",
+      "type": "object",
+      "properties": {
+        "v": { "const": 1 },
+        "seq": { "const": 0 }
+      },
+      "required": ["v", "seq"]
+    },
+    "sequencedEnvelope": {
+      "description": "Envelope of a message in the resumable stream: seq starts at 1 and increases by one per message (protocol.md §4.1).",
+      "type": "object",
+      "properties": {
+        "v": { "const": 1 },
+        "seq": { "$ref": "#/$defs/positiveUint32" }
+      },
+      "required": ["v", "seq"]
+    },
+    "sessionlessEnvelope": {
+      "description": "Envelope of a sequenced message that may also be sent with seq 0 before a session exists (protocol.md §4.1).",
+      "type": "object",
+      "properties": {
+        "v": { "const": 1 },
+        "seq": { "$ref": "#/$defs/uint32" }
+      },
+      "required": ["v", "seq"]
+    },
+    "capability": {
+      "description": "A capability token (protocol.md §3.3). Lowercase ASCII words separated by '.' or '-'; tokens starting with 'x-' are reserved for private experiments.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+      "maxLength": 64
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capability" }
+    },
+    "audioFormat": {
+      "description": "An audio encoding (protocol.md §8.2). sampleRate applies to pcm16; it defaults to 24000 when absent.",
+      "type": "object",
+      "properties": {
+        "encoding": { "enum": ["pcm16", "opus", "pcmu"] },
+        "sampleRate": { "$ref": "#/$defs/positiveUint32" }
+      },
+      "required": ["encoding"]
+    },
+    "toolSpec": {
+      "description": "A tool the client hosts. parameters is a JSON Schema object describing the arguments, as the model sees it.",
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "description": { "type": "string" },
+        "parameters": { "type": "object" }
+      },
+      "required": ["name", "description", "parameters"]
+    },
+    "failureCode": {
+      "description": "Why a tool call did not succeed (protocol.md §7.3).",
+      "enum": ["INTERRUPTED", "REJECTED", "INVALID", "TIMEOUT", "FAILED"]
+    },
+    "turnState": {
+      "enum": ["idle", "listening", "thinking", "speaking", "acting"]
+    },
+    "interruptReason": {
+      "enum": ["speech", "user", "keyboard"]
+    },
+    "errorCode": {
+      "description": "An error code (protocol.md §9.2). Upper-case ASCII words separated by '_'. The set is open: receivers act on `recoverable` for codes they do not know.",
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    }
+  }
+}

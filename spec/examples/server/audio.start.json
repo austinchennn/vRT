@@ -1,0 +1,11 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "server",
+  "description": "The audio.start message (protocol.md §8.3).",
+  "cases": [
+    { "id": "server/audio.start/basic", "description": "A new output audio item.", "valid": true, "message": { "v": 1, "seq": 0, "type": "audio.start", "itemId": "item-1", "responseId": "resp-1", "epoch": 3 } },
+    { "id": "server/audio.start/seq-positive", "description": "audio.start is transient and carries seq 0.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 3, "type": "audio.start", "itemId": "item-1", "responseId": "resp-1", "epoch": 3 } },
+    { "id": "server/audio.start/response-missing", "description": "responseId is required.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "audio.start", "itemId": "item-1", "epoch": 3 } }
+  ]
+}

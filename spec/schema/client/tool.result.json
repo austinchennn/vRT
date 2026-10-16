@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/client/tool.result.json",
+  "title": "tool.result",
+  "description": "The one result of a tool.call (protocol.md §7.2). Either ok with an output, or not ok with a failure code and message.",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sequencedEnvelope" }],
+  "properties": {
+    "type": { "const": "tool.result" },
+    "callId": { "$ref": "../common.json#/$defs/identifier" },
+    "epoch": { "$ref": "../common.json#/$defs/epoch", "description": "The epoch of the tool.call being answered." },
+    "ok": { "type": "boolean" }
+  },
+  "required": ["type", "callId", "epoch", "ok"],
+  "oneOf": [
+    {
+      "properties": {
+        "ok": { "const": true },
+        "output": { "$ref": "../common.json#/$defs/json", "description": "The tool's output; null when it returned nothing." }
+      },
+      "required": ["output"]
+    },
+    {
+      "properties": {
+        "ok": { "const": false },
+        "code": { "$ref": "../common.json#/$defs/failureCode" },
+        "message": { "type": "string" }
+      },
+      "required": ["code", "message"]
+    }
+  ]
+}

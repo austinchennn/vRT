@@ -1,0 +1,14 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "server",
+  "description": "The error message (protocol.md §9).",
+  "cases": [
+    { "id": "server/error/before-session", "description": "Errors sent before a session exists carry seq 0.", "valid": true, "message": { "v": 1, "seq": 0, "type": "error", "code": "UNAUTHORIZED", "message": "Authentication failed", "recoverable": false } },
+    { "id": "server/error/in-session", "description": "Errors inside a session are sequenced.", "valid": true, "message": { "v": 1, "seq": 12, "type": "error", "code": "INVALID_FIELD", "message": "Invalid field for text: text", "recoverable": true } },
+    { "id": "server/error/unknown-code", "description": "Error codes are an open set.", "valid": true, "message": { "v": 1, "seq": 13, "type": "error", "code": "QUOTA_EXCEEDED_2", "message": "", "recoverable": false } },
+    { "id": "server/error/code-lowercase", "description": "Error codes are upper-case.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "error", "code": "unauthorized", "message": "x", "recoverable": false } },
+    { "id": "server/error/code-empty", "description": "An error code is not empty.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "error", "code": "", "message": "x", "recoverable": false } },
+    { "id": "server/error/recoverable-missing", "description": "recoverable is required.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "error", "code": "X", "message": "x" } }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/client-message.json",
+  "title": "vRT protocol v1: client message",
+  "description": "Any JSON control message a client may send. The type member selects the message schema.",
+  "type": "object",
+  "properties": {
+    "type": { "enum": ["hello", "text", "interrupt", "playback", "tool.result", "context", "ack", "ping"] }
+  },
+  "required": ["type"],
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "hello" } }, "required": ["type"] }, "then": { "$ref": "client/hello.json" } },
+    { "if": { "properties": { "type": { "const": "text" } }, "required": ["type"] }, "then": { "$ref": "client/text.json" } },
+    { "if": { "properties": { "type": { "const": "interrupt" } }, "required": ["type"] }, "then": { "$ref": "client/interrupt.json" } },
+    { "if": { "properties": { "type": { "const": "playback" } }, "required": ["type"] }, "then": { "$ref": "client/playback.json" } },
+    { "if": { "properties": { "type": { "const": "tool.result" } }, "required": ["type"] }, "then": { "$ref": "client/tool.result.json" } },
+    { "if": { "properties": { "type": { "const": "context" } }, "required": ["type"] }, "then": { "$ref": "client/context.json" } },
+    { "if": { "properties": { "type": { "const": "ack" } }, "required": ["type"] }, "then": { "$ref": "client/ack.json" } },
+    { "if": { "properties": { "type": { "const": "ping" } }, "required": ["type"] }, "then": { "$ref": "client/ping.json" } }
+  ]
+}

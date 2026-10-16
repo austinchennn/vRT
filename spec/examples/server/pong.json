@@ -1,0 +1,10 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "server",
+  "description": "The pong message (protocol.md §4.4).",
+  "cases": [
+    { "id": "server/pong/basic", "description": "Answer to ping.", "valid": true, "message": { "v": 1, "seq": 0, "type": "pong" } },
+    { "id": "server/pong/seq-positive", "description": "pong is transient and carries seq 0.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 4, "type": "pong" } }
+  ]
+}
