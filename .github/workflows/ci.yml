@@ -43,6 +43,7 @@ jobs:
       - run: npm ci
       - run: npm run pack
       - run: npm run test:consumer
+      - run: node scripts/publish.mjs --dry-run
 
   workers:
     runs-on: ubuntu-latest

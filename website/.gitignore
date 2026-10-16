@@ -1,0 +1,4 @@
+.astro/
+# Generated from spec/ and packages/ by scripts/sync-content.mjs
+src/content/docs/reference/protocol.md
+src/content/docs/reference/packages.md
