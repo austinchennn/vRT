@@ -6,6 +6,7 @@ import {
   encodeAudioFrame,
   encodeMessage,
   negotiateCapabilities,
+  TOOL_STREAM_V1,
   type ClientMessage,
   type ServerMessage,
   type TurnStateWire,
@@ -17,6 +18,7 @@ import { CLIENT_CAPABILITIES } from './capabilities.js';
 import { Emitter } from './emitter.js';
 import { EpochGate } from './epoch-gate.js';
 import { ToolHost, type ClientTool, type PendingCall, type ToolOutcome } from './tool-host.js';
+import { ToolStreamTracker, type ToolStreamEvent } from './tool-streams.js';
 
 /** The browser `WebSocket` surface the client uses. */
 export interface ClientSocket {
@@ -70,6 +72,13 @@ export type ClientEvent =
   | { type: 'tool.preview'; callId: string; name: string; epoch: number; preview: unknown }
   | { type: 'tool.result'; callId: string; name: string; turnId: string; epoch: number; result: ToolOutcome }
   /**
+   * One step of a tool call's lifecycle, when the server supports `tool-stream-v1`
+   * (see `capabilities`): `start`, argument fragments, `arguments-complete`,
+   * progress, then exactly one of `settled`, `cancelled` or `failed`. Never emitted
+   * for a closed epoch; a local `interrupt()` cancels open calls at once.
+   */
+  | ToolStreamEvent
+  /**
    * `epoch` and every earlier epoch are closed: nothing from them takes effect any more.
    * Emitted once per closure: at once inside `interrupt()` (`local`), or when the
    * server interrupts on its own (`server`), never again when the server confirms.
@@ -98,6 +107,7 @@ export class ClientSession {
   #state: TurnStateWire = 'idle';
   readonly #gate = new EpochGate();
   readonly #tools: ToolHost;
+  readonly #streams: ToolStreamTracker;
   #audioItem: { id: string; epoch: number } | undefined;
   #audioSeq = 0;
   #attempt = 0;
@@ -120,6 +130,7 @@ export class ClientSession {
     this.#url = url;
     this.#options = options;
     this.#tools = new ToolHost(options.tools ?? {}, this.#gate, (call, outcome) => this.#result(call, outcome));
+    this.#streams = new ToolStreamTracker(this.#gate, (event) => this.#onToolStream(event));
   }
 
   get sessionId(): string | undefined {
@@ -258,6 +269,8 @@ export class ClientSession {
   #finish(code?: number, reason?: string): void {
     this.#socket = undefined;
     clearInterval(this.#heartbeat);
+    // Closing ends everything without reporting each open call as cancelled.
+    this.#streams.clear();
     this.#closeEpoch(Number.MAX_SAFE_INTEGER);
     this.#ready?.reject(new Error(`Connection closed before ready${code !== undefined ? ` (${code})` : ''}`));
     this.#ready = undefined;
@@ -337,6 +350,13 @@ export class ClientSession {
       case 'tool.call':
         this.#onToolCall({ callId: message.callId, name: message.name, args: message.arguments, turnId: message.turnId, epoch: message.epoch });
         return;
+      case 'tool.stream': {
+        // A server must not send it unless negotiated; ignore it if one does.
+        if (!this.#capabilities.has(TOOL_STREAM_V1)) return;
+        const { v: _version, seq: _seq, ...event } = message;
+        this.#streams.receive(event);
+        return;
+      }
       case 'interrupted':
         if (this.#closeEpoch(message.epoch)) this.#emitter.emit({ type: 'interrupted', epoch: message.epoch, source: 'server' });
         return;
@@ -406,6 +426,14 @@ export class ClientSession {
     this.#tools.submit(call);
   }
 
+  #onToolStream(event: ToolStreamEvent): void {
+    this.#emitter.emit(event);
+    // The 1.0 preview too, so apps written against tool.preview keep working.
+    const preview = { type: 'tool.preview', callId: event.callId, name: event.name, epoch: event.epoch } as const;
+    if (event.phase === 'arguments-delta') this.#emitter.emit({ ...preview, preview: { argumentsDelta: event.delta } });
+    if (event.phase === 'progress') this.#emitter.emit({ ...preview, preview: event.progress });
+  }
+
   #result(call: PendingCall, result: ToolOutcome): void {
     // A tool that returns nothing answers with output null: the member is required on the wire.
     this.#send(result.ok
@@ -418,6 +446,7 @@ export class ClientSession {
   #closeEpoch(epoch: number): boolean {
     if (!this.#gate.close(epoch)) return false;
     this.#tools.cancelClosed();
+    this.#streams.cancelClosed();
     if (this.#audioItem && this.#gate.isClosed(this.#audioItem.epoch)) this.#audioItem = undefined;
     void this.#flushPlayback();
     return true;
