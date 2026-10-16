@@ -17,12 +17,14 @@ import {
   encodeMessage,
   negotiateCapabilities,
   PROTOCOL_VERSION,
+  TOOL_STREAM_V1,
   type ClientMessage,
   type ServerMessage,
   type Unsequenced,
   type WireAudioFormat,
 } from '@vrealtime/protocol';
 import { supportedCapabilities } from './capabilities.js';
+import { legacyPreview, toolStreamMessage } from './tool-stream.js';
 
 /**
  * The only socket surface the server needs. Runtimes with event-style sockets
@@ -148,10 +150,14 @@ class LiveSession {
     agentSession.on('transcript', (e) => this.send({ type: 'transcript', role: e.role, itemId: e.itemId, text: e.text, final: e.final }));
     agentSession.on('text', (e) => this.send({ type: 'text', responseId: e.responseId, delta: e.delta }));
     agentSession.on('audio', (e) => this.#audio(e));
-    // `arguments` and `preview` are required members on the wire: a missing value is sent as null.
+    // `arguments` is a required member on the wire: a missing value is sent as null.
     agentSession.on('tool.call', (e) => this.send({ type: 'tool.call', callId: e.callId, epoch: e.epoch, turnId: e.turnId, name: e.name, arguments: e.arguments ?? null }));
-    agentSession.on('tool.call.delta', (e) => this.send({ type: 'tool.call.delta', callId: e.callId, epoch: e.epoch, name: e.name, preview: { argumentsDelta: e.argumentsDelta } }));
-    agentSession.on('tool.preview', (e) => this.send({ type: 'tool.call.delta', callId: e.callId, epoch: e.epoch, name: e.name, preview: e.preview ?? null }));
+    // One source for call progress: the full lifecycle with tool-stream-v1, the 1.0 preview without it, never both.
+    const toolStream = this.capabilities.includes(TOOL_STREAM_V1);
+    agentSession.on('tool.stream', (e) => {
+      const message = toolStream ? toolStreamMessage(e) : legacyPreview(e);
+      if (message) this.send(message);
+    });
     agentSession.on('interrupted', (e) => {
       this.#dropAudio(e.epoch);
       this.send({ type: 'interrupted', epoch: e.epoch });

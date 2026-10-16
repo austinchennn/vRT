@@ -76,4 +76,35 @@ describe('M0 end to end', () => {
 
     await session.close();
   });
+
+  it('streams a tool call to the app with tool-stream-v1 and cancels it the moment the app interrupts', async () => {
+    const model = fakeModel({
+      onCommand(command, session) {
+        if (command.type !== 'respond') return;
+        session.schedule({ type: 'response.start', responseId: 'r1' });
+        session.schedule({ type: 'tool.call.delta', responseId: 'r1', callId: 'c1', name: 'set_accent_color', argumentsDelta: '{"color":' }, 1);
+        session.schedule({ type: 'tool.call.delta', responseId: 'r1', callId: 'c1', name: 'set_accent_color', argumentsDelta: '"blue"}' }, 500);
+        session.schedule({ type: 'tool.call', responseId: 'r1', callId: 'c1', name: 'set_accent_color', arguments: { color: 'blue' } }, 501);
+      },
+    });
+    running = await serve(defineAgent({ model, instructions: 'test', clientTools: 'accept' }), { port: 0, clock: model.clock, onListening: () => {} });
+    let color = 'initial';
+    const session = await connect(running.url.replace('http', 'ws'), { tools: { set_accent_color: accentColorTool((c: string) => { color = c; }) } });
+    expect([...session.capabilities]).toEqual(['tool-stream-v1']);
+    const steps: string[] = [];
+    session.on('tool.stream', (e) => steps.push(e.phase));
+
+    session.sendText('make it blue');
+    await vi.waitFor(() => expect(model.session.commandsOf('respond')).toHaveLength(1));
+    model.clock.advance(2);
+    await vi.waitFor(() => expect(steps).toEqual(['start', 'arguments-delta']));
+    session.interrupt();
+    expect(steps).toEqual(['start', 'arguments-delta', 'cancelled']); // at once, before the server answers
+
+    model.clock.advance(1000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(steps).toEqual(['start', 'arguments-delta', 'cancelled']);
+    expect(color).toBe('initial');
+    await session.close();
+  });
 });

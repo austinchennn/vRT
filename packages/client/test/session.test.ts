@@ -42,7 +42,7 @@ describe('connect', () => {
       context: { doc: 'x' },
     });
     expect(socket.binaryType).toBe('arraybuffer');
-    expect(socket.ofType('hello')).toEqual([{ v: 1, seq: 0, type: 'hello', tools: [{ name: 'paint', description: 'Paint', parameters: { type: 'object' } }], context: { doc: 'x' } }]);
+    expect(socket.ofType('hello')).toEqual([{ v: 1, seq: 0, type: 'hello', tools: [{ name: 'paint', description: 'Paint', parameters: { type: 'object' } }], capabilities: ['tool-stream-v1'], context: { doc: 'x' } }]);
     expect(session.sessionId).toBe('sess');
     expect(session.connected).toBe(true);
   });

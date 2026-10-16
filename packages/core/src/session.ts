@@ -4,6 +4,7 @@ import { Emitter } from './emitter.js';
 import type { EventOf, RealtimeEvent } from './events.js';
 import type { Capabilities, RealtimeSession, SessionConfig, ToolSpec } from './model.js';
 import { validateToolArgs, type Tool, type ToolResult } from './tool.js';
+import { ToolStreams, type ToolStreamEvent } from './tool-stream.js';
 import type { Vad } from './vad.js';
 
 /** Time source and timers; injectable so tests run on virtual time. */
@@ -34,6 +35,12 @@ export type AgentEvent =
   | { type: 'tool.call.delta'; callId: string; epoch: number; name: string; argumentsDelta: string }
   /** Progress a running server tool reported through `context.emit`. */
   | { type: 'tool.preview'; callId: string; epoch: number; name: string; preview: unknown }
+  /**
+   * One step of a tool call's lifecycle, server or client (spec/protocol.md §7.5):
+   * `start`, argument fragments, `arguments-complete`, progress, then exactly one
+   * of `settled`, `cancelled` or `failed`.
+   */
+  | ToolStreamEvent
   | { type: 'tool.result'; callId: string; epoch: number; name: string; result: ToolResult }
   | { type: 'interrupted'; epoch: number; reason: InterruptReason }
   | { type: 'error'; error: Error; recoverable: boolean }
@@ -140,6 +147,7 @@ export class AgentSession {
   readonly #calls = new Map<string, CallRecord>();
   readonly #queue: CallRecord[] = [];
   #pumping = false;
+  readonly #streams: ToolStreams;
 
   readonly #audioItems = new Map<string, AudioItem>();
   readonly #played = new Map<string, number>();
@@ -159,6 +167,7 @@ export class AgentSession {
     this.#clock = options.clock ?? systemClock;
     // A throwing edge listener must not break dispatch, and must not loop back through `error`.
     this.#emitter = new Emitter<AgentEvent>((error) => this.#hook(() => agent.hooks?.onError?.(toError(error), true)));
+    this.#streams = new ToolStreams((event) => this.#emitter.emit(event));
     this.#serverTools = new Map(Object.entries(agent.tools ?? {}));
     this.#clientToolNames = new Set(acceptedClientTools(agent, options.clientTools).map((spec) => spec.name));
     this.#vad = agent.vad && !this.capabilities.turnDetection.server && agent.turnDetection !== null ? agent.vad() : undefined;
@@ -273,6 +282,7 @@ export class AgentSession {
       this.#settle(record, { ok: false, code: 'INTERRUPTED', message: `Interrupted by ${reason}` });
     }
     for (let i = this.#queue.length - 1; i >= 0; i--) if (this.#queue[i]!.status !== 'queued') this.#queue.splice(i, 1);
+    this.#streams.interrupted(closedEpoch);
 
     this.#emitter.emit({ type: 'interrupted', epoch: closedEpoch, reason });
     this.#metrics.interruptLatencyMs = this.#clock.now() - startedAt;
@@ -302,6 +312,7 @@ export class AgentSession {
       if (record.timer !== undefined) this.#clock.clearTimeout(record.timer);
     }
     this.#queue.length = 0;
+    this.#streams.clear();
     for (const off of this.#unsubscribe) off();
     await this.#model.close();
     this.#emitter.emit({ type: 'closed' });
@@ -360,10 +371,17 @@ export class AgentSession {
     });
     on('tool.call.delta', (event) => {
       const epoch = this.#liveEpoch(event.responseId);
-      if (epoch !== undefined) this.#emitter.emit({ type: 'tool.call.delta', callId: event.callId, epoch, name: event.name, argumentsDelta: event.argumentsDelta });
+      const turn = this.#turn;
+      if (epoch === undefined || !turn) return;
+      this.#emitter.emit({ type: 'tool.call.delta', callId: event.callId, epoch, name: event.name, argumentsDelta: event.argumentsDelta });
+      this.#streams.delta({ callId: event.callId, name: event.name, epoch, turnId: turn.id, responseId: event.responseId }, event.argumentsDelta);
     });
     on('tool.call', (event) => this.#onToolCall(event));
-    on('response.end', (event) => this.#onResponseEnd(event));
+    on('response.end', (event) => {
+      this.#onResponseEnd(event);
+      // Whatever the outcome, calls the response started but never issued are over.
+      this.#streams.responseEnded(event.responseId);
+    });
     on('error', (event) => this.#reportError(event.error, event.recoverable));
   }
 
@@ -426,6 +444,7 @@ export class AgentSession {
       this.#settle(record, { ok: false, code: 'INTERRUPTED', message: 'Issued by an interrupted turn' });
       return;
     }
+    this.#streams.complete({ callId: record.callId, name: record.name, epoch, turnId: turn.id, responseId: record.responseId }, record.args);
     this.#metrics.toolCalls++;
     if (this.#metrics.timeToFirstToolCallMs === undefined && this.#speechEndAt !== undefined) {
       this.#metrics.timeToFirstToolCallMs = this.#clock.now() - this.#speechEndAt;
@@ -493,7 +512,9 @@ export class AgentSession {
       epoch: record.epoch,
       data: this.data,
       emit: (preview: unknown) => {
-        if (record.status === 'running') this.#emitter.emit({ type: 'tool.preview', callId: record.callId, epoch: record.epoch, name: record.name, preview });
+        if (record.status !== 'running') return;
+        this.#emitter.emit({ type: 'tool.preview', callId: record.callId, epoch: record.epoch, name: record.name, preview });
+        this.#streams.progress(record.callId, preview);
       },
     };
     const run = Promise.resolve()
@@ -535,6 +556,7 @@ export class AgentSession {
     const idle = this.#turn === undefined;
     this.#model.submitToolResult(record.callId, toModelOutput(result), { respond: false });
     this.#emitter.emit({ type: 'tool.result', callId: record.callId, epoch: record.epoch, name: record.name, result });
+    this.#streams.settle(record.callId, result);
     if (record.responseId === undefined || !this.#responses.has(record.responseId)) this.#calls.delete(record.callId);
     this.#hook(() => this.agent.hooks?.afterToolCall?.(this.#callInfo(record), result));
     if (live && record.responseId !== undefined) this.#continueAfter(record.responseId);

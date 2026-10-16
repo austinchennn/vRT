@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, SESSIONLESS_TYPES, TRANSIENT_TYPES, type ClientMessage, type ServerMessage } from './messages.js';
+import { PROTOCOL_VERSION, SESSIONLESS_TYPES, TRANSIENT_TYPES, type ClientMessage, type ServerMessage, type ToolStreamPhase } from './messages.js';
 
 export type ProtocolErrorCode = 'MALFORMED' | 'UNSUPPORTED_VERSION' | 'UNKNOWN_TYPE' | 'INVALID_FIELD';
 export interface ProtocolError { code: ProtocolErrorCode; message: string }
@@ -39,6 +39,17 @@ const capabilities = arrayOf(matches(CAPABILITY, CAPABILITY_MAX_LENGTH));
 const failureCode = oneOf('INTERRUPTED', 'REJECTED', 'INVALID', 'TIMEOUT', 'FAILED');
 const turnState = oneOf('idle', 'listening', 'thinking', 'speaking', 'acting');
 
+/** The members each `tool.stream` phase carries. */
+const STREAM_PHASES: Readonly<Record<ToolStreamPhase['phase'], Variant>> = {
+  start: () => ({}),
+  'arguments-delta': () => ({ delta: str }),
+  'arguments-complete': () => ({ arguments: json }),
+  progress: () => ({ progress: json }),
+  settled: (m) => (m['ok'] === false ? { ok: bool, code: failureCode } : { ok: oneOf(true) }),
+  cancelled: () => ({}),
+  failed: () => ({ message: str }),
+};
+
 const CLIENT = {
   hello: { tools: arrayOf(toolSpec), input: opt(format), output: opt(format), sessionId: opt(id), resumeFrom: opt(uint32), capabilities: opt(capabilities), context: opt(json), auth: opt(str) },
   text: { text: str },
@@ -62,11 +73,16 @@ const SERVER = {
   text: { responseId: id, delta: str },
   'tool.call.delta': { callId: id, epoch: uint32, name: id, preview: json },
   'tool.call': { callId: id, epoch: uint32, turnId: id, name: id, arguments: json },
+  'tool.stream': { callId: id, epoch: uint32, turnId: id, name: id, phase: oneOf(...Object.keys(STREAM_PHASES)) },
   interrupted: { epoch: uint32 },
   ack: { upTo: uint32 },
   pong: {},
   error: { code: matches(ERROR_CODE), message: str, recoverable: bool },
 } satisfies Record<ServerMessage['type'], Shape>;
+
+const SERVER_VARIANTS: Partial<Record<ServerMessage['type'], Variant>> = {
+  'tool.stream': (m) => STREAM_PHASES[m['phase'] as keyof typeof STREAM_PHASES](m),
+};
 
 /** Every message type a client may send. */
 export const CLIENT_MESSAGE_TYPES = Object.keys(CLIENT) as readonly ClientMessage['type'][];
@@ -106,7 +122,7 @@ export function parseClientMessage(value: unknown): DecodeResult<ClientMessage> 
 }
 
 export function parseServerMessage(value: unknown): DecodeResult<ServerMessage> {
-  return parse(value, SERVER, {});
+  return parse(value, SERVER, SERVER_VARIANTS);
 }
 
 function decode<M>(text: unknown, parseValue: (value: unknown) => DecodeResult<M>): DecodeResult<M> {

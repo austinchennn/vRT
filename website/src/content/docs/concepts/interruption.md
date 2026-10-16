@@ -27,9 +27,10 @@ The user speaks over the agent, presses a stop button, or presses a key. The cli
 1. closes the current epoch locally;
 2. answers every queued tool call of that epoch with `INTERRUPTED`, without running it;
 3. aborts the `signal` of the tool that is running;
-4. stops playback and discards buffered audio;
-5. emits `interrupted` (with `source: 'local'`), so the UI can clear previews right away;
-6. then tells the server.
+4. ends every open `tool.stream` call of that epoch as `cancelled`;
+5. stops playback and discards buffered audio;
+6. emits `interrupted` (with `source: 'local'`), so the UI can clear previews right away;
+7. then tells the server.
 
 The server stops the model, settles the turn's pending calls, truncates the conversation to what was heard, and confirms with `interrupted`. The client does not report that confirmation a second time. When the server interrupts on its own, for example because its voice activity detection heard the user, the client reports it with `source: 'server'`.
 

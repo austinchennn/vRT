@@ -34,6 +34,18 @@ export type ClientMessage = Envelope & (
 );
 
 export type TurnStateWire = 'idle' | 'listening' | 'thinking' | 'speaking' | 'acting';
+export type FailureCodeWire = 'INTERRUPTED' | 'REJECTED' | 'INVALID' | 'TIMEOUT' | 'FAILED';
+
+/** One step of a tool call's lifecycle (`tool-stream-v1`); `settled`, `cancelled` and `failed` are terminal. */
+export type ToolStreamPhase =
+  | { phase: 'start' }
+  | { phase: 'arguments-delta'; delta: string }
+  | { phase: 'arguments-complete'; arguments: unknown }
+  | { phase: 'progress'; progress: unknown }
+  | { phase: 'settled'; ok: true }
+  | { phase: 'settled'; ok: false; code: FailureCodeWire }
+  | { phase: 'cancelled' }
+  | { phase: 'failed'; message: string };
 
 export type ServerMessage = Envelope & (
   /**
@@ -48,6 +60,8 @@ export type ServerMessage = Envelope & (
   | { type: 'text'; responseId: string; delta: string }
   | { type: 'tool.call.delta'; callId: string; epoch: number; name: string; preview: unknown }
   | { type: 'tool.call'; callId: string; epoch: number; turnId: string; name: string; arguments: unknown }
+  /** Sent instead of `tool.call.delta` when `tool-stream-v1` is in effect. */
+  | ({ type: 'tool.stream'; callId: string; epoch: number; turnId: string; name: string } & ToolStreamPhase)
   | { type: 'interrupted'; epoch: number }
   | { type: 'ack'; upTo: number }
   | { type: 'pong' }

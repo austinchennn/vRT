@@ -10,3 +10,4 @@ export type { AgentDefinition, BeforeToolCall, Hooks, ToolCallInfo, Turn, TurnMe
 export { AgentSession, serverToolSpecs, startSession, toModelOutput } from './session.js';
 export type { AgentEvent, AgentEventOf, AgentEventType, Clock, InterruptReason, StartSessionOptions, TranscriptItem } from './session.js';
 export type { Vad, VadFactory } from './vad.js';
+export type { ToolStreamEvent, ToolStreamStep } from './tool-stream.js';
