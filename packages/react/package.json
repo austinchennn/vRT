@@ -1,10 +1,25 @@
 {
   "name": "@vrealtime/react",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "React hooks for the vRealTime client",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/austinchennn/vRT.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/austinchennn/vRT#readme",
+  "bugs": "https://github.com/austinchennn/vRT/issues",
+  "keywords": [
+    "realtime",
+    "voice",
+    "agent",
+    "websocket",
+    "vrealtime"
+  ],
   "type": "module",
   "sideEffects": false,
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "@vrealtime/source": "./src/index.ts",
@@ -15,12 +30,18 @@
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@vrealtime/client": "0.0.0",
-    "@vrealtime/protocol": "0.0.0"
+    "@vrealtime/client": "0.1.0",
+    "@vrealtime/protocol": "0.1.0"
   },
   "peerDependencies": {
     "react": ">=18.0.0"

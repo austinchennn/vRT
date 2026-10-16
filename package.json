@@ -16,7 +16,9 @@
     "build": "node scripts/build.mjs",
     "check:budgets": "node scripts/check-budgets.mjs",
     "bench": "node scripts/bench.mjs",
-    "test:e2e": "vitest run examples"
+    "test:e2e": "vitest run examples",
+    "pack": "node scripts/pack.mjs",
+    "test:consumer": "node scripts/consumer-smoke.mjs"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.3",

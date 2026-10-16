@@ -90,6 +90,20 @@ export default { fetch: (request) => upgrade(agent, request) };
 
 Workers' `WebSocket` cannot send auth headers, so Boson and OpenAI connect through `fetchSocket()`. Inside a Durable Object, call `upgrade()` from its `fetch()`; sessions live in the object's memory, so route reconnects to the same object to resume.
 
+## Installing before the npm release
+
+Packages are not on npm yet (public release is M4). Build installable tarballs and add the ones you need to your app:
+
+```bash
+npm run pack
+```
+
+```bash
+npm i /path/to/vRT/release/vrealtime-core-0.1.0.tgz /path/to/vRT/release/vrealtime-protocol-0.1.0.tgz /path/to/vRT/release/vrealtime-openai-compatible-0.1.0.tgz /path/to/vRT/release/vrealtime-boson-0.1.0.tgz /path/to/vRT/release/vrealtime-server-0.1.0.tgz /path/to/vRT/release/vrealtime-client-0.1.0.tgz
+```
+
+Install each package together with the `@vrealtime/*` packages it depends on, as above. `npm run test:consumer` checks that the tarballs install into an empty project, import in Node and type-check with `moduleResolution` `bundler` and `nodenext`.
+
 ## Development
 
 ```bash

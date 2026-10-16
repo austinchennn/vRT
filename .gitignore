@@ -4,3 +4,4 @@ dist/
 .DS_Store
 examples/*/public/app.js
 examples/*/public/app.js.map
+release/
