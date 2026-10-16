@@ -1,6 +1,8 @@
 # vRealTime (vRT)
 
-**One protocol for voice agents that act on any app or device. Light, fast, interruptible.**
+**For decades, we learned the machine’s language. Now machines learn ours.**
+
+One protocol for voice agents that act on any app or device. Light, fast, interruptible.
 
 vRealTime lets people talk to software and devices the way they talk to each other. An agent listens, speaks and calls tools that run where they belong: in a web page, a phone app, a desktop program or a light switch.
 
