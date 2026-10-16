@@ -3,9 +3,7 @@ title: 安装
 description: 为服务端和 App 安装 vRT 的包。
 ---
 
-:::caution[首次发布到 npm 之前]
-`@vrealtime/*` 的包从 0.1.0 开始发布到 npm。在这次发布完成之前，请克隆仓库后用 `npm run pack` 生成可安装的 tarball，安装 `release/` 里的文件，并连同每个包依赖的其他 `@vrealtime` 包一起安装。
-:::
+所有包都以 [`@vrealtime`](https://www.npmjs.com/org/vrealtime) 作用域发布在 npm 上，由 CI 发布并附带 provenance（来源证明），所有包版本一致。只装你用到的即可。
 
 ## 环境要求
 

@@ -3,9 +3,7 @@ title: Installation
 description: Install the vRT packages for your server and your app.
 ---
 
-:::caution[Before the first npm release]
-The `@vrealtime/*` packages are published to npm starting with version 0.1.0. Until that release is out, build installable tarballs from a clone of the repository with `npm run pack` and install the files from `release/` instead, together with the `@vrealtime` packages each one depends on.
-:::
+All packages are published to npm under the [`@vrealtime`](https://www.npmjs.com/org/vrealtime) scope, from CI with provenance, and share one version. Install only the ones you use.
 
 ## Requirements
 

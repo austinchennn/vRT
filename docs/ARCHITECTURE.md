@@ -336,7 +336,7 @@ const model = cascade({
 
 ## 13. 待定
 
-- **命名**（已定）：全名 vRealTime，简称 vRT（GitHub 仓库名 `vRT`）；npm 使用 `@vrealtime/*`。`vrealtime` 包名、`@vrealtime` 组织名目前都还空着，需尽快用本人账号注册。
+- **命名**（已定）：全名 vRealTime，简称 vRT（GitHub 仓库名 `vRT`）；npm 使用 `@vrealtime/*`：`@vrealtime` 组织已注册，0.1.0 已于 2026-10-16 由 CI 发布（附 provenance，流程见 `RELEASING.md`）；不带作用域的 npm 包名 `vrealtime` 和 PyPI 上的 `vrealtime`（Python SDK，#18）都还没注册。
 - **许可证**（已定）：Apache-2.0。
 - **Python**：客户端 SDK 提前到 M1；Python 服务端运行时视需求再定。
 - **多连接会话**：音频端与工具宿主分离的协议设计（§7 第 2 条），在 M3 前定稿。

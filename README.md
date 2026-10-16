@@ -28,7 +28,7 @@ serve(defineAgent({
 }), { port: 8790, publicDir: new URL('./public', import.meta.url) });
 ```
 
-> Status: M0 and M2 are implemented in this repo: core runtime, protocol, Boson / OpenAI / Gemini adapters, cascade (STT + any AI SDK model + TTS), VAD, Node / Workers server, browser client and React hooks. The language-neutral [protocol spec](spec/) is written; the conformance suite and Python client SDK are in progress (M1). Packages are not published yet.
+> Status: M0 and M2 are implemented in this repo: core runtime, protocol, Boson / OpenAI / Gemini adapters, cascade (STT + any AI SDK model + TTS), VAD, Node / Workers server, browser client and React hooks. The language-neutral [protocol spec](spec/) is written; the conformance suite and Python client SDK are in progress (M1). Packages are published on npm as `@vrealtime/*`.
 
 ## How it fits together
 
@@ -130,19 +130,19 @@ serve(agent, {
 
 Tools and hooks see the principal as `context.data` / `info.data`; a session can only be resumed by the same principal.
 
-## Installing before the npm release
+## Install
 
-Packages are not on npm yet (public release is M4). Build installable tarballs and add the ones you need to your app:
+Packages are on npm as [`@vrealtime/*`](https://www.npmjs.com/org/vrealtime), each published from CI with [provenance](https://docs.npmjs.com/generating-provenance-statements). A server needs the runtime, the server edge and a model adapter (`ws` for Node's `serve()`); an app needs the client:
 
 ```bash
-npm run pack
+npm install @vrealtime/core @vrealtime/server @vrealtime/boson ws
 ```
 
 ```bash
-npm i /path/to/vRT/release/vrealtime-core-0.1.0.tgz /path/to/vRT/release/vrealtime-protocol-0.1.0.tgz /path/to/vRT/release/vrealtime-openai-compatible-0.1.0.tgz /path/to/vRT/release/vrealtime-boson-0.1.0.tgz /path/to/vRT/release/vrealtime-server-0.1.0.tgz /path/to/vRT/release/vrealtime-client-0.1.0.tgz
+npm install @vrealtime/client
 ```
 
-Install each package together with the `@vrealtime/*` packages it depends on, as above. `npm run test:consumer` checks that the tarballs install into an empty project, import in Node and type-check with `moduleResolution` `bundler` and `nodenext`.
+The [installation guide](https://austinchennn.github.io/vRT/get-started/installation/) lists every model and optional package. To try unreleased changes from `main`, run `npm run pack` and install the tarballs it writes to `release/`; releases publish those same files ([RELEASING.md](RELEASING.md)).
 
 ## Development
 
