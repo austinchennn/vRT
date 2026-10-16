@@ -17,6 +17,7 @@
     "check:budgets": "node scripts/check-budgets.mjs",
     "check:spec": "node scripts/check-spec.mjs",
     "bench": "node scripts/bench.mjs",
+    "bench:latency": "node scripts/bench-latency.mjs",
     "test:e2e": "vitest run examples/minimal",
     "pack": "node scripts/pack.mjs",
     "test:consumer": "node scripts/consumer-smoke.mjs",
