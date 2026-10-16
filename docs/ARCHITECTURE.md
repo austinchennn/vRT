@@ -187,7 +187,7 @@ const getWeather = tool({
 
 **唯一定义在 [`spec/`](../spec/)**：[`spec/protocol.md`](../spec/protocol.md) 写语义（状态机、epoch、续传、错误码），[`spec/schema/`](../spec/schema/) 用 JSON Schema 写每一条消息，[`spec/examples/`](../spec/examples/) 是带预期结果的合法和非法样例。`@vrealtime/protocol` 是它的 TypeScript 实现：CI 先检查 `spec/` 自洽（`npm run check:spec`），再用全部样例和逐字段变异的消息对比 TS 校验函数与 Schema 的判定（`packages/protocol/test/spec.test.ts`）；其他语言的 SDK 也从同一份 Schema 生成类型或做校验。
 
-版本规则：每条消息的 `v` 是大版本号（始终为 1）；`hello.capabilities` 声明可选能力，`ready.capabilities` 回复本会话生效的交集，缺省表示没有。小版本（v1.x）只能新增可选字段、新能力，以及只在协商成功后才发送的新消息类型和枚举值；接收方忽略不认识的字段和能力；破坏性变更只能出现在大版本。
+版本规则：每条消息的 `v` 是大版本号（始终为 1）；`hello.capabilities` 声明可选能力，`ready.capabilities` 回复本会话生效的交集，缺省表示没有；标准能力统一登记在 [`spec/capabilities.json`](../spec/capabilities.json)，实现只能声明已登记的能力（或 `x-` 私有能力），服务端按"运行时已实现 × 模型支持"决定可协商的集合。小版本（v1.x）只能新增可选字段、新能力，以及只在协商成功后才发送的新消息类型和枚举值；接收方忽略不认识的字段和能力；破坏性变更只能出现在大版本。
 
 - **二进制帧**放音频：1 字节类型 + 4 字节序号 + 负载，不做 base64。
 - **JSON 帧**放控制：`hello`（协议版本、客户端工具、音频格式、`sessionId` + 恢复点；v1.1 起可带 `auth` 短期令牌，放在首条消息里而不是 URL，服务端每次握手和续传都校验，续传必须是同一主体）、`ready`、`audio.start`（之后的二进制输出帧属于哪个 item，客户端据此按 item 上报已播放 ms）、`turn.state`、`transcript`、`text`、`tool.call` / `tool.call.delta` / `tool.result`、`interrupt`、`playback`（已播放 ms）、`ack`、`ping` / `pong`、`error`。

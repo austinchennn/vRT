@@ -1,5 +1,5 @@
 import { defineAgent, tool, type AgentDefinition, type Tool } from '@vrealtime/core';
-import { PROTOCOL_VERSION, decodeAudioFrame, decodeServerMessage, encodeAudioFrame, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
+import { PROTOCOL_VERSION, TRANSIENT_TYPES, decodeAudioFrame, decodeServerMessage, encodeAudioFrame, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
 import { fakeModel, type FakeModel } from '@vrealtime/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Hub, attach, type AttachOptions, type WebSocketLike } from '../src/index.js';
@@ -45,8 +45,8 @@ function setup(agentOptions: Partial<AgentDefinition> = {}, options: AttachOptio
     const connection = hub.attach(socket);
     let seq = 0;
     const send = (message: Unsequenced<ClientMessage>, explicitSeq?: number) => {
-      const transient = ['hello', 'ack', 'ping'].includes(message.type);
-      connection.receive(JSON.stringify({ v: PROTOCOL_VERSION, seq: explicitSeq ?? (transient ? 0 : ++seq), ...message }));
+      const stamped = explicitSeq ?? (TRANSIENT_TYPES.has(message.type) ? 0 : ++seq);
+      connection.receive(JSON.stringify({ v: PROTOCOL_VERSION, seq: stamped, ...message }));
     };
     return { socket, connection, send };
   };

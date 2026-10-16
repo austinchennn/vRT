@@ -5,6 +5,7 @@ import {
   decodeServerMessage,
   encodeAudioFrame,
   encodeMessage,
+  negotiateCapabilities,
   type ClientMessage,
   type ServerMessage,
   type TurnStateWire,
@@ -12,6 +13,7 @@ import {
   type WireAudioFormat,
 } from '@vrealtime/protocol';
 import { createMicrophone, createSpeaker, type AudioSink, type AudioSource } from './audio.js';
+import { CLIENT_CAPABILITIES } from './capabilities.js';
 import { Emitter } from './emitter.js';
 
 export type FailureCode = 'INTERRUPTED' | 'REJECTED' | 'INVALID' | 'TIMEOUT' | 'FAILED';
@@ -90,6 +92,7 @@ export type ClientEventType = ClientEvent['type'];
 
 const OPEN = 1;
 const PCM24: WireAudioFormat = { encoding: 'pcm16', sampleRate: 24000 };
+const OFFERED: ReadonlySet<string> = new Set(CLIENT_CAPABILITIES);
 const ACK_EVERY = 32;
 const ACK_DELAY_MS = 250;
 
@@ -130,6 +133,7 @@ export class ClientSession {
   #mic: AudioSource | undefined;
   #input: WireAudioFormat = PCM24;
   #output: WireAudioFormat = PCM24;
+  #capabilities: ReadonlySet<string> = new Set();
   #ready: { resolve: () => void; reject: (error: Error) => void } | undefined;
 
   constructor(url: string, options: ConnectOptions = {}) {
@@ -147,6 +151,11 @@ export class ClientSession {
 
   get epoch(): number {
     return this.#epoch;
+  }
+
+  /** Optional protocol features in effect for this session: offered by this client and confirmed in `ready`. */
+  get capabilities(): ReadonlySet<string> {
+    return this.#capabilities;
   }
 
   get connected(): boolean {
@@ -237,6 +246,7 @@ export class ClientSession {
       ...(audio && audio.input ? { input: PCM24 } : {}),
       ...(audio && audio.output ? { output: PCM24 } : {}),
       ...(this.#sessionId !== undefined ? { sessionId: this.#sessionId, resumeFrom: this.#inbox.lastSeq } : {}),
+      ...(OFFERED.size > 0 ? { capabilities: [...OFFERED] } : {}),
       ...(this.#options.context !== undefined && !this.#everReady ? { context: this.#options.context } : {}),
       ...(auth !== undefined ? { auth } : {}),
     };
@@ -369,6 +379,8 @@ export class ClientSession {
     this.#sessionId = message.sessionId;
     this.#input = message.input;
     this.#output = message.output;
+    // A capability the server confirms without this client offering it is not in effect.
+    this.#capabilities = new Set(negotiateCapabilities(message.capabilities, OFFERED));
     this.#attempt = 0;
     if (resumed) {
       const missed = this.#outbox.resendFrom(message.resumedFrom!);

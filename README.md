@@ -151,6 +151,8 @@ npm run check:spec && npm run typecheck && npm test && npm run test:e2e
 npm run build && npm run check:budgets && npm run bench
 ```
 
+`npm run bench:latency -- --rtt 100` measures how long a tool-argument preview, a tool call and an interruption take to reach the app over a WebSocket with a simulated round-trip time (after `npm run build`).
+
 ## Design
 
 - [Protocol specification](spec/): the wire protocol every implementation follows, with JSON Schemas and test vectors

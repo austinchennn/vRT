@@ -1,69 +1,12 @@
-import { PROTOCOL_VERSION, decodeAudioFrame, decodeClientMessage, encodeAudioFrame, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
+import { decodeAudioFrame, encodeAudioFrame } from '@vrealtime/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connect, type AudioSink, type ClientEvent, type ClientSession, type ConnectOptions } from '../src/index.js';
-
-type Listener = (event: any) => void;
+import { FakeSocket, flush, latest } from './support/fake-socket.js';
 
 /** Every control frame the client sends must be a valid client message (spec/). */
-const offSpec: string[] = [];
 afterEach(() => {
-  expect(offSpec.splice(0)).toEqual([]);
+  expect(FakeSocket.offSpec.splice(0)).toEqual([]);
 });
-
-class FakeSocket {
-  static instances: FakeSocket[] = [];
-  readyState = 0;
-  binaryType = 'blob';
-  sent: (string | Uint8Array)[] = [];
-  closedWith: [number | undefined, string | undefined] | undefined;
-  #listeners: Record<string, Listener[]> = {};
-  #serverSeq = 0;
-  constructor(readonly url: string) {
-    FakeSocket.instances.push(this);
-  }
-  addEventListener(type: string, listener: Listener) {
-    (this.#listeners[type] ??= []).push(listener);
-  }
-  send(data: string | Uint8Array) {
-    const decoded = typeof data === 'string' ? decodeClientMessage(data) : undefined;
-    if (decoded && !decoded.ok) offSpec.push(`${decoded.error.message}: ${data}`);
-    this.sent.push(data);
-  }
-  close(code?: number, reason?: string) {
-    this.closedWith = [code, reason];
-    this.drop(code ?? 1000, reason ?? '');
-  }
-  open() {
-    this.readyState = 1;
-    this.#fire('open', {});
-  }
-  drop(code = 1006, reason = '') {
-    if (this.readyState === 3) return;
-    this.readyState = 3;
-    this.#fire('close', { code, reason });
-  }
-  server(message: Unsequenced<ServerMessage>, seq?: number) {
-    const transient = ['ready', 'audio.start', 'ack', 'pong'].includes(message.type);
-    this.#fire('message', { data: JSON.stringify({ v: PROTOCOL_VERSION, seq: seq ?? (transient ? 0 : ++this.#serverSeq), ...message }) });
-  }
-  binary(frame: Uint8Array) {
-    this.#fire('message', { data: frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength) });
-  }
-  messages(): ClientMessage[] {
-    return this.sent.filter((d): d is string => typeof d === 'string').map((d) => JSON.parse(d));
-  }
-  ofType<T extends ClientMessage['type']>(type: T) {
-    return this.messages().filter((m): m is Extract<ClientMessage, { type: T }> => m.type === type);
-  }
-  #fire(type: string, event: unknown) {
-    for (const listener of this.#listeners[type] ?? []) listener(event);
-  }
-}
-
-const latest = () => FakeSocket.instances.at(-1)!;
-const flush = async () => {
-  for (let i = 0; i < 20; i++) await Promise.resolve();
-};
 
 async function start(options: ConnectOptions = {}) {
   const pending = connect('ws://test', { WebSocket: FakeSocket as never, ...options });

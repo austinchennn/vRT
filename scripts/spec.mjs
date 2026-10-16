@@ -9,6 +9,9 @@ export const SPEC_DIR = join(root, 'spec');
 export const SCHEMA_DIR = join(SPEC_DIR, 'schema');
 export const EXAMPLES_DIR = join(SPEC_DIR, 'examples');
 export const VECTORS_SCHEMA = join(EXAMPLES_DIR, 'vectors.schema.json');
+export const CAPABILITY_REGISTRY = join(SPEC_DIR, 'capabilities.json');
+export const CAPABILITY_REGISTRY_SCHEMA = join(SPEC_DIR, 'capabilities.schema.json');
+export const PROTOCOL_DOC = join(SPEC_DIR, 'protocol.md');
 export const DIRECTIONS = /** @type {const} */ (['client', 'server']);
 
 /** Root schema validating any message sent by `direction`. */
@@ -38,6 +41,16 @@ export function messageSchemas(schemas, direction) {
     byType.set(type, { path, schema });
   }
   return byType;
+}
+
+/** spec/capabilities.json: every standard capability (protocol.md §3.4). */
+export function loadCapabilityRegistry() {
+  return readJson(CAPABILITY_REGISTRY);
+}
+
+/** Every token in the capability registry. */
+export function registeredCapabilities(registry = loadCapabilityRegistry()) {
+  return new Set(registry.capabilities.map((capability) => capability.token));
 }
 
 /** Every vector file under spec/examples: its path relative to spec/examples and its content. */
@@ -81,6 +94,7 @@ export function caseFrame(testCase) {
 export function createValidator(schemas = loadSchemas()) {
   const ajv = new Ajv2020({ strict: true, allErrors: true });
   for (const schema of schemas.values()) ajv.addSchema(schema);
+  const registry = ajv.compile(readJson(CAPABILITY_REGISTRY_SCHEMA));
   // The vector format is tooling, not protocol: its exactly-one-of and if/then
   // rules name members in `required` only, which strictRequired forbids.
   const vectorFile = new Ajv2020({ strict: true, strictRequired: false, allErrors: true }).compile(readJson(VECTORS_SCHEMA));
@@ -99,6 +113,10 @@ export function createValidator(schemas = loadSchemas()) {
     validate(direction, value) {
       const validate = roots[direction];
       return validate(value) ? { valid: true } : { valid: false, errors: ajv.errorsText(validate.errors) };
+    },
+    /** Checks the capability registry's format. */
+    capabilityRegistry(content) {
+      return registry(content) ? { valid: true } : { valid: false, errors: ajv.errorsText(registry.errors) };
     },
     /** Checks one vector file's format. */
     vectorFile(file) {
