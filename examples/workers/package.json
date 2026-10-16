@@ -1,0 +1,18 @@
+{
+  "name": "vrealtime-example-workers",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "@vrealtime/boson": "0.1.0",
+    "@vrealtime/core": "0.1.0",
+    "@vrealtime/server": "0.1.0"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.0"
+  }
+}

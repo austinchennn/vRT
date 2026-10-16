@@ -5,3 +5,4 @@ dist/
 examples/*/public/app.js
 examples/*/public/app.js.map
 release/
+.wrangler/

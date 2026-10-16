@@ -88,7 +88,22 @@ const agent = defineAgent({ model: boson({ apiKey: env.BOSON_API_KEY, socket: fe
 export default { fetch: (request) => upgrade(agent, request) };
 ```
 
-Workers' `WebSocket` cannot send auth headers, so Boson and OpenAI connect through `fetchSocket()`. Inside a Durable Object, call `upgrade()` from its `fetch()`; sessions live in the object's memory, so route reconnects to the same object to resume.
+Workers' `WebSocket` cannot send auth headers, so Boson and OpenAI connect through `fetchSocket()`. Inside a Durable Object, call `upgrade()` from its `fetch()`; sessions live in the object's memory, so route reconnects to the same object to resume. [examples/workers](examples/workers) is a complete Worker with one Durable Object per document and token auth; `npm run test:workers` runs it in `wrangler dev` (workerd) against a mock Boson server.
+
+### Authentication
+
+Tokens go in the first message, never in the URL. The client takes a string or a function (called on every reconnect, so short-lived tokens can rotate); the server decides who is connected and configures the session for them:
+
+```ts
+connect(url, { auth: () => fetchShortLivedToken(), context: { docId } });
+
+serve(agent, {
+  authenticate: async ({ token, context, headers }) => verify(token, context),   // → { id, ... } or undefined to refuse
+  configure: (principal) => ({ instructions: `You edit ${principal?.docId}.` }),
+});
+```
+
+Tools and hooks see the principal as `context.data` / `info.data`; a session can only be resumed by the same principal.
 
 ## Installing before the npm release
 

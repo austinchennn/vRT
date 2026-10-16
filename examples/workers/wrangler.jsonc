@@ -1,0 +1,10 @@
+{
+  // vdoc's deployment shape: one Durable Object per document holds the agent session.
+  "name": "vrealtime-example-workers",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-01",
+  "durable_objects": {
+    "bindings": [{ "name": "AGENT", "class_name": "AgentObject" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AgentObject"] }]
+}
