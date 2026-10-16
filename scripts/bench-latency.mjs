@@ -2,7 +2,8 @@
 // scripted model, so the numbers are vRT's own overhead (no model, no network):
 //   preview    model emits a tool-argument delta  → client emits `tool.preview`
 //   call       model emits a tool call            → the client tool's run() starts
-//   interrupt  app calls session.interrupt()      → client emits `interrupted`
+//   interrupt  app calls session.interrupt()      → client emits `interrupted` (what the UI waits for)
+//   confirmed  app calls session.interrupt()      → the server's turn ends (`turn.state` idle)
 // `--rtt <ms>` delays every frame by half of it each way, to show which paths wait for the server.
 // Baseline only: it reports p50/p95 and enforces no budget.
 // Runs against the built packages: npm run build && npm run bench:latency [-- --rtt 100 --iterations 500 --json]
@@ -23,7 +24,7 @@ const { values: args } = parseArgs({
 const ITERATIONS = Number(args.iterations);
 const WARMUP = Number(args.warmup);
 const RTT_MS = Number(args.rtt);
-const METRICS = ['preview', 'call', 'interrupt'];
+const METRICS = ['preview', 'call', 'interrupt', 'confirmed'];
 
 const model = fakeModel();
 const server = await serve(defineAgent({ model, instructions: '', clientTools: 'accept' }), { port: 0, onListening: () => {} });
@@ -98,9 +99,9 @@ async function iteration(i) {
   const idle = next((e) => e.type === 'state' && e.state === 'idle');
   session.interrupt();
   const interrupt = (await interrupted) - start;
-  await idle;
+  const confirmed = (await idle) - start;
   model.clock.advance(0); // delivers the scripted model's own end of the cancelled response
-  return { preview, call, interrupt };
+  return { preview, call, interrupt, confirmed };
 }
 
 const samples = Object.fromEntries(METRICS.map((metric) => [metric, []]));
