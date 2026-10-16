@@ -21,6 +21,8 @@ export interface ClientToolContext {
   /** Aborted when the call's turn is interrupted. */
   signal: AbortSignal;
   callId: string;
+  /** The agent turn that issued the call; group edits by it (e.g. undo a whole turn). */
+  turnId: string;
   epoch: number;
 }
 
@@ -71,9 +73,9 @@ export type ClientEvent =
   | { type: 'state'; state: TurnStateWire; turnId: string; epoch: number }
   | { type: 'transcript'; role: 'user' | 'agent'; itemId: string; text: string; final: boolean }
   | { type: 'text'; responseId: string; delta: string }
-  | { type: 'tool.call'; callId: string; name: string; arguments: unknown; epoch: number }
+  | { type: 'tool.call'; callId: string; name: string; arguments: unknown; turnId: string; epoch: number }
   | { type: 'tool.preview'; callId: string; name: string; epoch: number; preview: unknown }
-  | { type: 'tool.result'; callId: string; name: string; epoch: number; result: ToolOutcome }
+  | { type: 'tool.result'; callId: string; name: string; turnId: string; epoch: number; result: ToolOutcome }
   | { type: 'interrupted'; epoch: number }
   | { type: 'error'; code: string; message: string; recoverable: boolean }
   | { type: 'reconnecting'; attempt: number; delayMs: number }
@@ -90,6 +92,7 @@ interface PendingCall {
   callId: string;
   name: string;
   args: unknown;
+  turnId: string;
   epoch: number;
 }
 
@@ -321,7 +324,7 @@ export class ClientSession {
         this.#emitter.emit({ type: 'tool.preview', callId: message.callId, name: message.name, epoch: message.epoch, preview: message.preview });
         return;
       case 'tool.call':
-        this.#onToolCall({ callId: message.callId, name: message.name, args: message.arguments, epoch: message.epoch });
+        this.#onToolCall({ callId: message.callId, name: message.name, args: message.arguments, turnId: message.turnId, epoch: message.epoch });
         return;
       case 'interrupted':
         this.#closeEpoch(message.epoch);
@@ -390,7 +393,7 @@ export class ClientSession {
 
   #onToolCall(call: PendingCall): void {
     this.#seeEpoch(call.epoch);
-    this.#emitter.emit({ type: 'tool.call', callId: call.callId, name: call.name, arguments: call.args, epoch: call.epoch });
+    this.#emitter.emit({ type: 'tool.call', callId: call.callId, name: call.name, arguments: call.args, turnId: call.turnId, epoch: call.epoch });
     if (call.epoch <= this.#closedEpoch) {
       this.#result(call, { ok: false, code: 'INTERRUPTED', message: 'Interrupted before it started' });
       return;
@@ -424,7 +427,7 @@ export class ClientSession {
     const aborted = new Promise<ToolOutcome>((resolve) =>
       controller.signal.addEventListener('abort', () => resolve({ ok: false, code: 'INTERRUPTED', message: 'Interrupted while running' }), { once: true }));
     const ran = Promise.resolve()
-      .then(() => tool.run(call.args, { signal: controller.signal, callId: call.callId, epoch: call.epoch }))
+      .then(() => tool.run(call.args, { signal: controller.signal, callId: call.callId, turnId: call.turnId, epoch: call.epoch }))
       .then((output): ToolOutcome => ({ ok: true, output }), (error): ToolOutcome => ({ ok: false, code: 'FAILED', message: error instanceof Error ? error.message : String(error) }));
     const result = await Promise.race([ran, aborted]);
     this.#current = undefined;
@@ -435,7 +438,7 @@ export class ClientSession {
     this.#send(result.ok
       ? { type: 'tool.result', callId: call.callId, epoch: call.epoch, ok: true, output: result.output }
       : { type: 'tool.result', callId: call.callId, epoch: call.epoch, ok: false, code: result.code, message: result.message });
-    this.#emitter.emit({ type: 'tool.result', callId: call.callId, name: call.name, epoch: call.epoch, result });
+    this.#emitter.emit({ type: 'tool.result', callId: call.callId, name: call.name, turnId: call.turnId, epoch: call.epoch, result });
   }
 
   #closeEpoch(epoch: number): void {

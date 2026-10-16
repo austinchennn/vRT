@@ -162,7 +162,8 @@ describe('tool host', () => {
 
     socket.server({ type: 'tool.call', callId: 'c4', epoch: 4, turnId: 't2', name: 'fast', arguments: { n: 1 } });
     await flush();
-    expect(run).toHaveBeenCalledWith({ n: 1 }, expect.objectContaining({ callId: 'c4', epoch: 4 }));
+    expect(run).toHaveBeenCalledWith({ n: 1 }, expect.objectContaining({ callId: 'c4', turnId: 't2', epoch: 4 }));
+    expect(events.filter((e) => e.type === 'tool.result').at(-1)).toMatchObject({ callId: 'c4', turnId: 't2' });
   });
 
   it('a server interrupted message closes the epoch too', async () => {
