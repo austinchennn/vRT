@@ -1,0 +1,48 @@
+---
+title: 面向语音 agent 的协议
+description: 一份协议，让语音 agent 操作任何 App 和设备。轻、快、可打断。
+template: splash
+hero:
+  title: 能操作任何 App 和设备的语音 agent
+  tagline: 几十年来，我们一直在学机器的语言；现在轮到机器来学我们的。vRealTime（vRT）是一份面向语音 agent 的协议：agent 的工具在你的网页、手机 App、桌面程序甚至电灯开关里执行，用户一打断就立刻停下。
+---
+
+import { Card, CardGrid, LinkButton, LinkCard } from '@astrojs/starlight/components';
+
+{/* 按钮放在正文而不是 `hero.actions` 里：Starlight 会原样输出那里的链接，不加站点 base。 */}
+<div class="hero-actions">
+  <LinkButton href="/zh-cn/get-started/quickstart/" icon="right-arrow">快速开始</LinkButton>
+  <LinkButton href="/zh-cn/get-started/overview/" variant="minimal">工作原理</LinkButton>
+</div>
+
+## 为什么选 vRT
+
+<CardGrid>
+  <Card title="协议优先" icon="document">
+    与语言无关的协议规范，配 JSON Schema 和测试用例，定义什么叫"兼容"。TypeScript 包是参考实现，不是定义本身。
+  </Card>
+  <Card title="生来可打断" icon="warning">
+    每一轮都有一个 epoch。用户一打断，这一轮的东西都不再生效：工具调用不会开始，音频不会播放。
+  </Card>
+  <Card title="工具在该在的地方执行" icon="laptop">
+    服务端工具跑在 agent 旁边；App 工具跑在用户的网页或设备里，按顺序逐个执行，并受 epoch 闸门约束。
+  </Card>
+  <Card title="任何模型" icon="random">
+    Boson Higgs Realtime、OpenAI Realtime、Gemini Live，或者任何文本大模型加上语音识别和语音合成。换模型不用改 App 代码。
+  </Card>
+  <Card title="到处能跑" icon="rocket">
+    Node、Bun、Deno、Cloudflare Workers 和 Durable Objects，以及浏览器。只用 Web 标准 API，不需要媒体服务器。
+  </Card>
+  <Card title="轻" icon="star">
+    零依赖的核心，每家模型一个小包，音频走二进制帧而不是 base64 JSON，体积预算由 CI 强制检查。
+  </Card>
+</CardGrid>
+
+## 从哪里开始
+
+<CardGrid>
+  <LinkCard title="构建 agent" description="选模型、写指令、加工具和 hooks，然后启动服务。" href="/zh-cn/guides/agents/" />
+  <LinkCard title="接入 App" description="用浏览器客户端在网页里托管工具和音频。" href="/zh-cn/guides/browser-client/" />
+  <LinkCard title="实现协议" description="根据协议规范，用其他语言写客户端或服务端。" href="/zh-cn/reference/protocol/" />
+  <LinkCard title="理解打断" description="轮次、epoch，以及保证被打断的轮次不再生效的规则。" href="/zh-cn/concepts/interruption/" />
+</CardGrid>

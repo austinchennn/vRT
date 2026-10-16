@@ -1,0 +1,23 @@
+{
+  "name": "vrealtime-docs",
+  "private": true,
+  "type": "module",
+  "description": "Documentation site for vRealTime (vRT), built with Astro Starlight.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "sync": "node scripts/sync-content.mjs",
+    "dev": "npm run sync && astro dev",
+    "build": "npm run sync && astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/markdown-remark": "7.3.1",
+    "@astrojs/starlight": "0.42.5",
+    "astro": "7.3.5"
+  },
+  "devDependencies": {
+    "starlight-links-validator": "0.26.0"
+  }
+}

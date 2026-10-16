@@ -1,0 +1,48 @@
+---
+title: One protocol for voice agents
+description: One protocol for voice agents that act on any app or device. Light, fast, interruptible.
+template: splash
+hero:
+  title: Voice agents that act on any app or device
+  tagline: For decades, we learned the machine's language. Now machines learn ours. vRealTime (vRT) is one protocol for voice agents whose tools run in your web page, phone app, desktop program or light switch, and stop the moment the user interrupts.
+---
+
+import { Card, CardGrid, LinkButton, LinkCard } from '@astrojs/starlight/components';
+
+{/* Actions live here rather than in `hero.actions`: Starlight renders those links as written, without the site base. */}
+<div class="hero-actions">
+  <LinkButton href="/get-started/quickstart/" icon="right-arrow">Quickstart</LinkButton>
+  <LinkButton href="/get-started/overview/" variant="minimal">How it works</LinkButton>
+</div>
+
+## Why vRT
+
+<CardGrid>
+  <Card title="Protocol-first" icon="document">
+    A language-neutral specification with JSON Schemas and test vectors defines what "compatible" means. The TypeScript packages are its reference implementation, not its definition.
+  </Card>
+  <Card title="Interruptible by design" icon="warning">
+    Every turn has an epoch. Once the user interrupts, nothing from that turn takes effect: its tool calls never start and its audio never plays.
+  </Card>
+  <Card title="Tools run where they belong" icon="laptop">
+    Server tools run next to the agent; app tools run in the user's page or device, one at a time, behind the epoch gate.
+  </Card>
+  <Card title="Any model" icon="random">
+    Boson Higgs Realtime, OpenAI Realtime, Gemini Live, or any text LLM with speech-to-text and text-to-speech. Switching models changes no app code.
+  </Card>
+  <Card title="Runs anywhere" icon="rocket">
+    Node, Bun, Deno, Cloudflare Workers and Durable Objects, and the browser. Web-standard APIs only; no media server.
+  </Card>
+  <Card title="Light" icon="star">
+    A zero-dependency core, one small package per provider, binary audio frames instead of base64 JSON, and size budgets enforced in CI.
+  </Card>
+</CardGrid>
+
+## Where to start
+
+<CardGrid>
+  <LinkCard title="Build an agent" description="Pick a model, write instructions, add tools and hooks, and serve it." href="/guides/agents/" />
+  <LinkCard title="Connect an app" description="Host tools and audio in a web page with the browser client." href="/guides/browser-client/" />
+  <LinkCard title="Implement the protocol" description="Write a client or server in another language from the specification." href="/reference/protocol/" />
+  <LinkCard title="Understand interruption" description="Turns, epochs and the guarantees that keep interrupted turns from acting." href="/concepts/interruption/" />
+</CardGrid>

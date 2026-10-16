@@ -1,0 +1,71 @@
+name: Docs
+
+# Builds the documentation site (website/) on every change to it or to what it is
+# generated from, and deploys it to GitHub Pages from main.
+on:
+  push:
+    branches: [main]
+    paths:
+      - website/**
+      - spec/**
+      - packages/*/package.json
+      - .github/workflows/docs.yml
+  pull_request:
+    paths:
+      - website/**
+      - spec/**
+      - packages/*/package.json
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # "Last updated" dates come from git history
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      # Where Pages serves the site (project page or custom domain); pull requests build with the defaults.
+      - id: pages
+        if: env.DEPLOY == 'true'
+        uses: actions/configure-pages@v5
+      - run: npm ci
+        working-directory: website
+      # Generates the pages sourced from spec/ and packages/, builds, and validates every internal link.
+      - run: npm run build
+        working-directory: website
+        env:
+          DOCS_SITE: ${{ steps.pages.outputs.origin }}
+          DOCS_BASE: ${{ steps.pages.outputs.base_path }}
+      - if: env.DEPLOY == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/dist
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
