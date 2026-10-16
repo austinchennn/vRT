@@ -158,5 +158,8 @@ describe('sequencing', () => {
     expect(inbox.accept({ type: 'text', seq: 3 })).toBe(true);
     expect(inbox.lastSeq).toBe(3);
     expect(new Inbox(10).accept({ type: 'text', seq: 9 })).toBe(false);
+    // Errors sent before a session exists carry seq 0 and must never be dropped.
+    expect(inbox.accept({ type: 'error', seq: 0 })).toBe(true);
+    expect(inbox.accept({ type: 'error', seq: 0 })).toBe(true);
   });
 });

@@ -96,6 +96,14 @@ describe('connect', () => {
     expect(session.connected).toBe(true);
   });
 
+  it('surfaces an error sent before any session exists (seq 0)', async () => {
+    const pending = connect('ws://test', { WebSocket: FakeSocket as never });
+    latest().open();
+    latest().server({ type: 'error', code: 'UNAUTHORIZED', message: 'bad token', recoverable: false }, 0);
+    latest().drop(4401);
+    await expect(pending).rejects.toThrow('UNAUTHORIZED: bad token');
+  });
+
   it('rejects when the socket closes before ready or the server refuses', async () => {
     const pending = connect('ws://test', { WebSocket: FakeSocket as never });
     latest().drop(1006);
