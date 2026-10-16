@@ -1,7 +1,11 @@
-export type { AudioChunk, AudioFormat } from './audio.js';
+export type { AudioChunk, AudioFormat, Pcm16Rate } from './audio.js';
+export { Pcm16Resampler, fromBase64, pcm16DurationMs, resamplePcm16, toBase64 } from './audio.js';
+export { Emitter } from './emitter.js';
 export type { EventOf, EventType, RealtimeEvent, ResponseStatus, Usage } from './events.js';
 export type { Capabilities, RealtimeModel, RealtimeSession, RespondOptions, SessionConfig, ToolSpec } from './model.js';
-export { tool } from './tool.js';
-export type { JsonSchema, StandardResult, StandardSchemaV1, Tool, ToolContext, ToolResult, ToolRisk } from './tool.js';
+export { tool, validateToolArgs } from './tool.js';
+export type { JsonSchema, StandardResult, StandardSchemaV1, Tool, ToolContext, ToolFailure, ToolResult, ToolRisk } from './tool.js';
 export { defineAgent } from './agent.js';
 export type { AgentDefinition, BeforeToolCall, Hooks, ToolCallInfo, Turn, TurnMetrics, TurnState } from './agent.js';
+export { AgentSession, serverToolSpecs, startSession, toModelOutput } from './session.js';
+export type { AgentEvent, AgentEventOf, AgentEventType, Clock, InterruptReason, StartSessionOptions, TranscriptItem } from './session.js';

@@ -45,3 +45,26 @@ export type ToolResult =
 export function tool<Args, Result>(definition: Tool<Args, Result>): Tool<Args, Result> {
   return definition;
 }
+
+export type ToolFailure = Extract<ToolResult, { ok: false }>;
+
+/** Runs a Standard Schema; issues (or a throwing validator) become an `INVALID` tool result. */
+export async function validateToolArgs<Args>(
+  schema: StandardSchemaV1<unknown, Args>,
+  value: unknown,
+): Promise<{ ok: true; value: Args } | ToolFailure> {
+  let result: StandardResult<Args>;
+  try {
+    result = await schema['~standard'].validate(value);
+  } catch (error) {
+    return { ok: false, code: 'INVALID', message: error instanceof Error ? error.message : String(error) };
+  }
+  if (result.issues === undefined) return { ok: true, value: result.value };
+  const message = result.issues
+    .map((issue) => {
+      const path = issue.path?.map((segment) => String(typeof segment === 'object' ? segment.key : segment)).join('.');
+      return path ? `${path}: ${issue.message}` : issue.message;
+    })
+    .join('; ');
+  return { ok: false, code: 'INVALID', message: message || 'Invalid arguments' };
+}
