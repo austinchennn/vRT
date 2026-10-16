@@ -1,5 +1,18 @@
 {
   "$schema": "./capabilities.schema.json",
   "description": "Every standard capability (protocol.md §3.4). Implementations offer only tokens listed here, or private tokens starting with x-.",
-  "capabilities": []
+  "capabilities": [
+    {
+      "token": "tool-stream-v1",
+      "status": "draft",
+      "since": "1.2",
+      "summary": "An explicit lifecycle for every tool call: argument fragments as the model generates them, progress while it runs, and exactly one terminal event.",
+      "specification": "protocol.md#75-tool-streams-tool-stream-v1",
+      "messages": {
+        "server": [
+          "tool.stream"
+        ]
+      }
+    }
+  ]
 }

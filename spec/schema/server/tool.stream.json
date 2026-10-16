@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/server/tool.stream.json",
+  "title": "tool.stream",
+  "description": "One step in the lifecycle of a tool call, for display only. Sent only when tool-stream-v1 is in effect (protocol.md §7.5).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sequencedEnvelope" }],
+  "properties": {
+    "type": { "const": "tool.stream" },
+    "callId": { "$ref": "../common.json#/$defs/identifier" },
+    "epoch": { "$ref": "../common.json#/$defs/epoch" },
+    "turnId": { "$ref": "../common.json#/$defs/identifier", "description": "The turn that issued the call." },
+    "name": { "$ref": "../common.json#/$defs/identifier", "description": "The tool's name." },
+    "phase": { "enum": ["start", "arguments-delta", "arguments-complete", "progress", "settled", "cancelled", "failed"] }
+  },
+  "required": ["type", "callId", "epoch", "turnId", "name", "phase"],
+  "oneOf": [
+    {
+      "description": "start, cancelled: no further members.",
+      "properties": { "phase": { "enum": ["start", "cancelled"] } }
+    },
+    {
+      "properties": {
+        "phase": { "const": "arguments-delta" },
+        "delta": { "type": "string", "description": "The next fragment of the arguments' JSON text." }
+      },
+      "required": ["delta"]
+    },
+    {
+      "properties": {
+        "phase": { "const": "arguments-complete" },
+        "arguments": { "$ref": "../common.json#/$defs/json", "description": "The complete arguments." }
+      },
+      "required": ["arguments"]
+    },
+    {
+      "properties": {
+        "phase": { "const": "progress" },
+        "progress": { "$ref": "../common.json#/$defs/json", "description": "Progress a running server tool reported." }
+      },
+      "required": ["progress"]
+    },
+    {
+      "properties": {
+        "phase": { "const": "settled" },
+        "ok": { "const": true }
+      },
+      "required": ["ok"]
+    },
+    {
+      "properties": {
+        "phase": { "const": "settled" },
+        "ok": { "const": false },
+        "code": { "$ref": "../common.json#/$defs/failureCode" }
+      },
+      "required": ["ok", "code"]
+    },
+    {
+      "properties": {
+        "phase": { "const": "failed" },
+        "message": { "type": "string", "description": "Why the arguments were never completed." }
+      },
+      "required": ["message"]
+    }
+  ]
+}

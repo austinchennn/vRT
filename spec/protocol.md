@@ -1,6 +1,6 @@
 # vRT protocol, version 1
 
-Revision 1.1, 2026-10-16. Status: draft until the conformance suite (`conformance/`) ships.
+Revision 1.2, 2026-10-16. Status: draft until the conformance suite (`conformance/`) ships.
 
 This document defines the vRealTime (vRT) wire protocol between a **client** (an app or device that hosts tools and, optionally, audio input and output) and a **server** (which runs the agent and talks to the model). It is normative together with the JSON Schemas in [`schema/`](schema/). Where this document and a schema disagree about the structure of a message, the schema wins; this document defines everything a schema cannot: ordering, state and behaviour.
 
@@ -327,6 +327,39 @@ A client MUST answer every `tool.call` with exactly one `tool.result` carrying t
 
 A receiver MUST NOT run, commit or decide anything because of a preview. A preview does not imply that the matching `tool.call` will ever be sent.
 
+When `tool-stream-v1` is in effect (§7.5), the server reports this progress with `tool.stream` instead, and MUST NOT send `tool.call.delta`.
+
+### 7.5 Tool streams (`tool-stream-v1`)
+
+This section applies only when the capability `tool-stream-v1` is in effect (§3.3). It gives every tool call, server or client, an explicit lifecycle the client can display: the arguments as the model generates them, progress while the call runs, and how it ended.
+
+The server sends `tool.stream` messages. Each names the call (`callId`, `name`), the turn that issued it (`turnId`, `epoch`), and a `phase`:
+
+| Phase | Member | Meaning |
+|---|---|---|
+| `start` | none | The first message about the call |
+| `arguments-delta` | `delta` (string) | The next fragment of the arguments' JSON text, as the model generates it |
+| `arguments-complete` | `arguments` (JSON) | The model finished the arguments; the call is issued |
+| `progress` | `progress` (JSON) | Progress a running server tool reported |
+| `settled` | `ok`, and `code` when not ok | The call has its one result |
+| `cancelled` | none | The call ended because its turn was interrupted, before or after its arguments completed |
+| `failed` | `message` | The model stopped before completing the arguments, so the call was never issued |
+
+`settled`, `cancelled` and `failed` are **terminal**. For every call, the server MUST send:
+
+1. `start` first, before any other phase of that call;
+2. any `arguments-delta` messages before `arguments-complete`, which it sends at most once;
+3. `progress` only after `arguments-complete` and before the terminal phase;
+4. exactly one terminal phase, after which nothing about the call is sent. The only exception is a session that ends first.
+
+A model that does not stream arguments produces `start`, `arguments-complete` and a terminal phase only, so a client can show a waiting state until the call ends.
+
+Rules for receivers:
+
+- `tool.stream` is display information, like a preview (§7.4). `arguments-complete` does not run anything: a client tool still runs only on `tool.call`, under §7.1 and the epoch gate (§6.2).
+- A client SHOULD discard `tool.stream` messages of closed epochs. When it closes an epoch locally (§6.2), it SHOULD treat every call of that epoch that has not reached a terminal phase as cancelled at once, and ignore the server's later terminal message for it.
+- `settled` reports only whether the call succeeded and, if not, its failure code (§7.3). The output of a server tool is never included.
+
 ## 8. Audio
 
 ### 8.1 Audio frames
@@ -443,12 +476,17 @@ This version sets no maximum message size, tool count or queue length. Implement
 | server | `text` | sequenced | Agent text response chunk | [text](schema/server/text.json) |
 | server | `tool.call.delta` | sequenced | Display-only progress of a call | [tool.call.delta](schema/server/tool.call.delta.json) |
 | server | `tool.call` | sequenced | Run a client tool | [tool.call](schema/server/tool.call.json) |
+| server | `tool.stream` | sequenced, `tool-stream-v1` | Lifecycle of a tool call | [tool.stream](schema/server/tool.stream.json) |
 | server | `interrupted` | sequenced | An epoch was closed | [interrupted](schema/server/interrupted.json) |
 | server | `ack` | transient | Acknowledge client messages | [ack](schema/server/ack.json) |
 | server | `pong` | transient | Heartbeat answer | [pong](schema/server/pong.json) |
 | server | `error` | sessionless | Something went wrong | [error](schema/server/error.json) |
 
 ## Appendix B. Revision history
+
+**1.2** (2026-10-16)
+
+- Added the capability `tool-stream-v1` and the `tool.stream` message: an explicit lifecycle for every tool call (§7.5).
 
 **1.1** (2026-10-16)
 
