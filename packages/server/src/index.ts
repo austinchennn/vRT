@@ -15,6 +15,7 @@ import {
   decodeClientMessage,
   encodeAudioFrame,
   encodeMessage,
+  negotiateCapabilities,
   PROTOCOL_VERSION,
   type ClientMessage,
   type ServerMessage,
@@ -85,6 +86,8 @@ const REFUSED = Symbol('refused');
 const FLUSH_INTERVAL_MS = 10;
 const OUTPUT = 2;
 const INPUT = 1;
+/** Optional protocol capabilities this server implements (spec/protocol.md §3). None yet. */
+const CAPABILITIES: ReadonlySet<string> = new Set();
 
 const systemClock: Clock = {
   now: () => performance.now(),
@@ -129,6 +132,8 @@ class LiveSession {
   session!: AgentSession;
   input: AudioFormat = PCM24;
   output: AudioFormat = PCM24;
+  /** Negotiated when the session starts; fixed for its lifetime, resumes included. */
+  capabilities: readonly string[] = [];
   socket: SocketConnection | undefined;
   expiry: unknown;
   #audioSeq = 0;
@@ -144,9 +149,10 @@ class LiveSession {
     agentSession.on('transcript', (e) => this.send({ type: 'transcript', role: e.role, itemId: e.itemId, text: e.text, final: e.final }));
     agentSession.on('text', (e) => this.send({ type: 'text', responseId: e.responseId, delta: e.delta }));
     agentSession.on('audio', (e) => this.#audio(e));
-    agentSession.on('tool.call', (e) => this.send({ type: 'tool.call', callId: e.callId, epoch: e.epoch, turnId: e.turnId, name: e.name, arguments: e.arguments }));
+    // `arguments` and `preview` are required members on the wire: a missing value is sent as null.
+    agentSession.on('tool.call', (e) => this.send({ type: 'tool.call', callId: e.callId, epoch: e.epoch, turnId: e.turnId, name: e.name, arguments: e.arguments ?? null }));
     agentSession.on('tool.call.delta', (e) => this.send({ type: 'tool.call.delta', callId: e.callId, epoch: e.epoch, name: e.name, preview: { argumentsDelta: e.argumentsDelta } }));
-    agentSession.on('tool.preview', (e) => this.send({ type: 'tool.call.delta', callId: e.callId, epoch: e.epoch, name: e.name, preview: e.preview }));
+    agentSession.on('tool.preview', (e) => this.send({ type: 'tool.call.delta', callId: e.callId, epoch: e.epoch, name: e.name, preview: e.preview ?? null }));
     agentSession.on('interrupted', (e) => {
       this.#dropAudio(e.epoch);
       this.send({ type: 'interrupted', epoch: e.epoch });
@@ -161,6 +167,18 @@ class LiveSession {
   send(message: Unsequenced<ServerMessage>, epoch?: number): void {
     const stamped = this.outbox.stamp(message);
     this.#write(encodeMessage(stamped), epoch);
+  }
+
+  /** Opens the session on the bound socket; `resumedFrom` is set on a resume. */
+  sendReady(resumedFrom?: number): void {
+    this.send({
+      type: 'ready',
+      sessionId: this.id,
+      input: toWireFormat(this.input),
+      output: toWireFormat(this.output),
+      ...(resumedFrom !== undefined ? { resumedFrom } : {}),
+      ...(this.capabilities.length > 0 ? { capabilities: [...this.capabilities] } : {}),
+    });
   }
 
   /** Re-sends everything after the client's last seen seq. False when that is no longer possible. */
@@ -346,6 +364,7 @@ class SocketConnection implements Connection {
     const supported = this.hub.agent.model.capabilities;
     live.input = negotiate(hello.input, supported.input.formats);
     live.output = negotiate(hello.output, supported.output.formats);
+    live.capabilities = negotiateCapabilities(hello.capabilities, CAPABILITIES);
     try {
       const configured = (await this.hub.options.configure?.(principal, { context: hello.context })) ?? {};
       const session = await startSession(this.hub.agent, {
@@ -367,7 +386,7 @@ class SocketConnection implements Connection {
       return undefined;
     }
     this.#bind(live);
-    live.send({ type: 'ready', sessionId: live.id, input: toWireFormat(live.input), output: toWireFormat(live.output) });
+    live.sendReady();
     live.resend(0); // anything the session emitted before the socket was bound
     return live;
   }
@@ -383,9 +402,9 @@ class SocketConnection implements Connection {
     live.socket?.close(4000, 'replaced by a newer connection');
     this.#bind(live);
     if (live.session.closed) return undefined;
-    live.send({ type: 'ready', sessionId: live.id, input: toWireFormat(live.input), output: toWireFormat(live.output), resumedFrom: live.inbox.lastSeq });
+    live.sendReady(live.inbox.lastSeq);
     if (!live.resend(hello.resumeFrom ?? 0)) {
-      this.#error('RESUME_FAILED', 'Missed messages are no longer available', false);
+      this.#error('RESUME_FAILED', 'Cannot resend from resumeFrom: those messages were dropped or never sent', false);
       void live.session.close();
       return undefined;
     }
