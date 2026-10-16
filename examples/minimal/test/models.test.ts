@@ -185,7 +185,9 @@ async function scenario(model: RealtimeModel, late: { release: () => void }) {
   session.sendText('make it blue');
   await vi.waitFor(() => expect(session.state).toBe('speaking'), { timeout: 3000 });
   session.interrupt();
-  await vi.waitFor(() => expect(events.some((e) => e.type === 'interrupted')).toBe(true));
+  expect(events.some((e) => e.type === 'interrupted')).toBe(true); // reported locally, at once
+  // Release the late tool call only once the server has ended the interrupted turn, so it is dropped there.
+  await vi.waitFor(() => expect(session.state).toBe('idle'));
   late.release();
   await new Promise((resolve) => setTimeout(resolve, 100));
   await session.close();

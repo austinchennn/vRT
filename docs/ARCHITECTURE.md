@@ -218,7 +218,9 @@ session.interrupt();
 
 - 麦克风：AudioWorklet 采集，按需重采样或用 WebCodecs 编码 Opus，以二进制帧发送。
 - 播放：AudioWorklet 环形缓冲。收到 `input.speech.start` 或本地 VAD 触发时**立即清空缓冲**，并上报已播放的毫秒数。
-- 工具宿主：按到达顺序串行执行，带 **epoch 闸门**：`interrupt()` 在本地立刻关闭当前 epoch，收到的旧 epoch 调用一律回 `INTERRUPTED`，不执行。
+- 工具宿主：按到达顺序串行执行，带 **epoch 闸门**：`interrupt()` 在本地立刻关闭当前 epoch，收到的旧 epoch 调用一律回 `INTERRUPTED`，不执行；工具真正开始执行的那一刻会再检查一次闸门，排队后才到的打断也拦得住；已关闭 epoch 的 `tool.call.delta` 预览直接丢弃。
+- 打断通知不等服务端：`interrupt()` 当场发出 `interrupted`（`source: 'local'`），UI 立即清理预览和播放；服务端随后对同一 epoch 的确认不再重复通知，服务端自己发起的打断（如插话）发出 `source: 'server'`。`npm run bench:latency -- --rtt 100` 下打断通知从约 103 ms（一个往返）降到约 0.01 ms。
+- 结构：`EpochGate`（epoch 状态）、`ToolHost`（排队、执行、恰好一个结果）、`ClientSession`（连接与编排）各管一件事。
 - 零依赖。React 绑定放在 `@vrealtime/react`。
 
 ### 5.4 一致性测试套件

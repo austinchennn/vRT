@@ -4,13 +4,10 @@ export type {
   ClientEvent,
   ClientEventType,
   ClientSocket,
-  ClientTool,
-  ClientToolContext,
   ConnectOptions,
-  FailureCode,
   ReconnectOptions,
-  ToolOutcome,
 } from './session.js';
+export type { ClientTool, ClientToolContext, FailureCode, ToolOutcome } from './tool-host.js';
 export { createMicrophone, createSpeaker } from './audio.js';
 export type { AudioSink, AudioSource } from './audio.js';
 export { PlaybackRing } from './ring.js';
