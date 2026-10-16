@@ -2,6 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "customConditions": [],
+    "allowJs": false,
     "noEmit": false,
     "declaration": true,
     "sourceMap": false

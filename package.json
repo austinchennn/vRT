@@ -4,17 +4,19 @@
   "license": "Apache-2.0",
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "examples/*"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run packages",
     "build": "node scripts/build.mjs",
     "check:budgets": "node scripts/check-budgets.mjs",
-    "bench": "node scripts/bench.mjs"
+    "bench": "node scripts/bench.mjs",
+    "test:e2e": "vitest run examples"
   },
   "devDependencies": {
     "@types/node": "22.18.0",

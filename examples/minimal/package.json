@@ -1,0 +1,20 @@
+{
+  "name": "vrealtime-example-minimal",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node build.mjs && node server.js",
+    "start:fake": "node build.mjs && node fake-server.js"
+  },
+  "dependencies": {
+    "@vrealtime/boson": "0.0.0",
+    "@vrealtime/client": "0.0.0",
+    "@vrealtime/core": "0.0.0",
+    "@vrealtime/server": "0.0.0",
+    "@vrealtime/testing": "0.0.0",
+    "ws": "8.18.3"
+  }
+}
