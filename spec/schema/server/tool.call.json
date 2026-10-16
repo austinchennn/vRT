@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/server/tool.call.json",
+  "title": "tool.call",
+  "description": "Run a client tool. The client answers with exactly one tool.result (protocol.md §7).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sequencedEnvelope" }],
+  "properties": {
+    "type": { "const": "tool.call" },
+    "callId": { "$ref": "../common.json#/$defs/identifier", "description": "Unique within the session." },
+    "epoch": { "$ref": "../common.json#/$defs/epoch" },
+    "turnId": { "$ref": "../common.json#/$defs/identifier", "description": "The turn that issued the call." },
+    "name": { "$ref": "../common.json#/$defs/identifier", "description": "A tool name the client declared in hello." },
+    "arguments": { "$ref": "../common.json#/$defs/json" }
+  },
+  "required": ["type", "callId", "epoch", "turnId", "name", "arguments"]
+}

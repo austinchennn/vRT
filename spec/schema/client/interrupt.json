@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/client/interrupt.json",
+  "title": "interrupt",
+  "description": "The client has closed epoch `epoch` (and every earlier one) locally and asks the server to stop the response in flight (protocol.md §6.2).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sequencedEnvelope" }],
+  "properties": {
+    "type": { "const": "interrupt" },
+    "epoch": { "$ref": "../common.json#/$defs/epoch", "description": "The newest epoch the client has observed." },
+    "reason": { "$ref": "../common.json#/$defs/interruptReason" }
+  },
+  "required": ["type", "epoch", "reason"]
+}

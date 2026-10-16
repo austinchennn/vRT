@@ -1,0 +1,11 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "server",
+  "description": "The server text message.",
+  "cases": [
+    { "id": "server/text/delta", "description": "A chunk of response text.", "valid": true, "message": { "v": 1, "seq": 5, "type": "text", "responseId": "resp-1", "delta": "Done." } },
+    { "id": "server/text/empty-delta", "description": "An empty chunk is valid.", "valid": true, "message": { "v": 1, "seq": 5, "type": "text", "responseId": "resp-1", "delta": "" } },
+    { "id": "server/text/response-empty", "description": "A response id is not empty.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 5, "type": "text", "responseId": "", "delta": "x" } }
+  ]
+}

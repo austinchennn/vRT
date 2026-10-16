@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/examples/vectors.schema.json",
+  "title": "vRT test vector file",
+  "description": "Format of every file in spec/examples. A control suite holds JSON control frames sent in one direction; an audio suite holds binary frames. See spec/README.md.",
+  "oneOf": [{ "$ref": "#/$defs/controlSuite" }, { "$ref": "#/$defs/audioSuite" }],
+  "$defs": {
+    "caseId": {
+      "description": "Unique across all vector files. Conformance reports refer to cases by id.",
+      "type": "string",
+      "pattern": "^[a-z0-9.-]+(?:/[a-z0-9.-]+)+$"
+    },
+    "hex": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{2})*$"
+    },
+    "controlSuite": {
+      "type": "object",
+      "properties": {
+        "$schema": { "type": "string" },
+        "suite": { "const": "control" },
+        "direction": { "description": "Who sends these frames.", "enum": ["client", "server"] },
+        "description": { "type": "string" },
+        "cases": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/controlCase" } }
+      },
+      "required": ["suite", "direction", "description", "cases"],
+      "additionalProperties": false
+    },
+    "controlCase": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/caseId" },
+        "description": { "type": "string" },
+        "valid": { "type": "boolean" },
+        "error": {
+          "description": "For an invalid case: the error code a receiver reports (protocol.md §9.1).",
+          "enum": ["MALFORMED", "UNSUPPORTED_VERSION", "UNKNOWN_TYPE", "INVALID_FIELD"]
+        },
+        "message": { "description": "The JSON value sent as one text frame." },
+        "raw": { "description": "The exact text frame, for cases a JSON value cannot express (invalid JSON).", "type": "string" }
+      },
+      "required": ["id", "description", "valid"],
+      "additionalProperties": false,
+      "oneOf": [{ "required": ["message"] }, { "required": ["raw"] }],
+      "if": { "properties": { "valid": { "const": false } } },
+      "then": { "required": ["error"] },
+      "else": { "not": { "required": ["error"] } }
+    },
+    "audioSuite": {
+      "type": "object",
+      "properties": {
+        "$schema": { "type": "string" },
+        "suite": { "const": "audio" },
+        "description": { "type": "string" },
+        "cases": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/audioCase" } }
+      },
+      "required": ["suite", "description", "cases"],
+      "additionalProperties": false
+    },
+    "audioCase": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/caseId" },
+        "description": { "type": "string" },
+        "bytes": { "$ref": "#/$defs/hex", "description": "The binary frame, as lowercase hex." },
+        "valid": { "type": "boolean" },
+        "frame": {
+          "description": "For a valid case: the decoded header and payload.",
+          "type": "object",
+          "properties": {
+            "kind": { "enum": [1, 2] },
+            "seq": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+            "payload": { "$ref": "#/$defs/hex" }
+          },
+          "required": ["kind", "seq", "payload"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["id", "description", "bytes", "valid"],
+      "additionalProperties": false,
+      "if": { "properties": { "valid": { "const": true } } },
+      "then": { "required": ["frame"] },
+      "else": { "not": { "required": ["frame"] } }
+    }
+  }
+}

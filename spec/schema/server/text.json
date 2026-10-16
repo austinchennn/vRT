@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/server/text.json",
+  "title": "text (server)",
+  "description": "A chunk of the agent's text response.",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sequencedEnvelope" }],
+  "properties": {
+    "type": { "const": "text" },
+    "responseId": { "$ref": "../common.json#/$defs/identifier" },
+    "delta": { "type": "string" }
+  },
+  "required": ["type", "responseId", "delta"]
+}

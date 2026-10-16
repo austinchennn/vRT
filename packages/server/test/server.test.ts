@@ -1,17 +1,25 @@
 import { defineAgent, tool, type AgentDefinition, type Tool } from '@vrealtime/core';
-import { PROTOCOL_VERSION, decodeAudioFrame, encodeAudioFrame, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
+import { PROTOCOL_VERSION, decodeAudioFrame, decodeServerMessage, encodeAudioFrame, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
 import { fakeModel, type FakeModel } from '@vrealtime/testing';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { Hub, attach, type AttachOptions, type WebSocketLike } from '../src/index.js';
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const pcm24 = { encoding: 'pcm16', sampleRate: 24000, channels: 1 } as const;
+
+/** Every control frame the server sends must be a valid server message (spec/). */
+const offSpec: string[] = [];
+afterEach(() => {
+  expect(offSpec.splice(0)).toEqual([]);
+});
 
 class FakeSocket implements WebSocketLike {
   sent: (string | Uint8Array)[] = [];
   bufferedAmount = 0;
   closedWith: [number | undefined, string | undefined] | undefined;
   send(data: string | Uint8Array) {
+    const decoded = typeof data === 'string' ? decodeServerMessage(data) : undefined;
+    if (decoded && !decoded.ok) offSpec.push(`${decoded.error.message}: ${data}`);
     this.sent.push(data);
   }
   close(code?: number, reason?: string) {
@@ -95,6 +103,13 @@ describe('handshake', () => {
     expect(model.session.commandsOf('sendText')).toHaveLength(1);
   });
 
+  it('negotiates capabilities once per session and omits them while none apply', async () => {
+    const { model, connect } = setup();
+    const client = connect();
+    const { ready: r } = await ready(model, client, { capabilities: ['x-not-implemented'] });
+    expect(r).not.toHaveProperty('capabilities');
+  });
+
   it('attach() shares one hub per agent and wires event-style sockets', async () => {
     const model = fakeModel();
     const agent = defineAgent({ model, instructions: '' });
@@ -121,6 +136,17 @@ describe('client tools', () => {
     expect(call).toMatchObject({ callId: 'c1', name: 'paint', arguments: { color: 'red' } });
     client.send({ type: 'tool.result', callId: 'c1', epoch: call.epoch, ok: true, output: 'done' });
     expect(fake.commandsOf('submitToolResult')).toEqual([{ type: 'submitToolResult', callId: 'c1', output: 'done', options: { respond: false } }]);
+  });
+
+  it('sends missing arguments and previews as null, never as an absent member', async () => {
+    const { model, connect } = setup();
+    const client = connect();
+    const { fake } = await ready(model, client, { tools: [paint] });
+    fake.emit({ type: 'input.speech.start', atMs: 0 });
+    fake.emit({ type: 'response.start', responseId: 'r1' });
+    fake.emit({ type: 'tool.call', responseId: 'r1', callId: 'c1', name: 'paint', arguments: undefined });
+    await flush();
+    expect(client.socket.ofType('tool.call')[0]).toHaveProperty('arguments', null);
   });
 
   it('resolves a missing result as TIMEOUT after clientToolTimeoutMs', async () => {
@@ -219,6 +245,18 @@ describe('resume and heartbeat', () => {
     expect(second.socket.ofType('ready')[0]).toMatchObject({ sessionId: r.sessionId, resumedFrom: 0 });
     expect(second.socket.ofType('transcript').map((t) => t.text)).toEqual(['two']);
     expect(model.sessions).toHaveLength(1);
+  });
+
+  it('fails a resume from a seq the server never sent', async () => {
+    const { model, connect } = setup();
+    const first = connect();
+    const { fake, ready: r } = await ready(model, first);
+    first.connection.closed();
+    const second = connect();
+    second.send({ type: 'hello', tools: [], sessionId: r.sessionId, resumeFrom: 99 });
+    await flush();
+    expect(second.socket.ofType('error')[0]).toMatchObject({ code: 'RESUME_FAILED', recoverable: false });
+    expect(fake.closed).toBe(true);
   });
 
   it('a newer connection replaces the old socket', async () => {

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/client/ping.json",
+  "title": "ping",
+  "description": "Heartbeat; the server answers with pong (protocol.md §4.4).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/transientEnvelope" }],
+  "properties": {
+    "type": { "const": "ping" }
+  },
+  "required": ["type"]
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/server/audio.start.json",
+  "title": "audio.start",
+  "description": "Output audio frames that follow belong to this item, until the next audio.start (protocol.md §8.3).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/transientEnvelope" }],
+  "properties": {
+    "type": { "const": "audio.start" },
+    "itemId": { "$ref": "../common.json#/$defs/identifier" },
+    "responseId": { "$ref": "../common.json#/$defs/identifier" },
+    "epoch": { "$ref": "../common.json#/$defs/epoch" }
+  },
+  "required": ["type", "itemId", "responseId", "epoch"]
+}

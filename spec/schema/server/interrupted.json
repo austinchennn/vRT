@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/server/interrupted.json",
+  "title": "interrupted",
+  "description": "Epoch `epoch` and every earlier one are closed (protocol.md §6.2).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sequencedEnvelope" }],
+  "properties": {
+    "type": { "const": "interrupted" },
+    "epoch": { "$ref": "../common.json#/$defs/epoch" }
+  },
+  "required": ["type", "epoch"]
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "server",
+  "description": "The tool.call message (protocol.md §7.1).",
+  "cases": [
+    { "id": "server/tool.call/basic", "description": "Run a client tool.", "valid": true, "message": { "v": 1, "seq": 7, "type": "tool.call", "callId": "call-1", "epoch": 2, "turnId": "turn-2", "name": "set_color", "arguments": { "color": "blue" } } },
+    { "id": "server/tool.call/arguments-null", "description": "Arguments may be any JSON value, including null.", "valid": true, "message": { "v": 1, "seq": 7, "type": "tool.call", "callId": "call-1", "epoch": 2, "turnId": "turn-2", "name": "reset", "arguments": null } },
+    { "id": "server/tool.call/arguments-missing", "description": "The arguments member is required.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 7, "type": "tool.call", "callId": "call-1", "epoch": 2, "turnId": "turn-2", "name": "reset" } },
+    { "id": "server/tool.call/turn-missing", "description": "turnId is required.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 7, "type": "tool.call", "callId": "call-1", "epoch": 2, "name": "reset", "arguments": {} } },
+    { "id": "server/tool.call/name-empty", "description": "A tool name is not empty.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 7, "type": "tool.call", "callId": "call-1", "epoch": 2, "turnId": "turn-2", "name": "", "arguments": {} } }
+  ]
+}

@@ -8,6 +8,7 @@ import {
   decodeServerMessage,
   encodeAudioFrame,
   encodeMessage,
+  negotiateCapabilities,
   parseClientMessage,
   writeAudioHeader,
   type ClientMessage,
@@ -15,32 +16,34 @@ import {
 } from '../src/index.js';
 
 const env = { v: 1 as const, seq: 7 };
+/** Transient messages (hello, ready, audio.start, ack, ping, pong) always carry seq 0. */
+const transient = { v: 1 as const, seq: 0 };
 const pcm = { encoding: 'pcm16' as const, sampleRate: 24000 };
 
 const clientMessages: ClientMessage[] = [
-  { ...env, type: 'hello', tools: [{ name: 'paint', description: 'd', parameters: { type: 'object' } }], input: pcm, output: { encoding: 'opus' }, sessionId: 's1', resumeFrom: 3, context: { doc: 1 }, auth: 'token-abc' },
-  { ...env, type: 'hello', tools: [] },
+  { ...transient, type: 'hello', tools: [{ name: 'paint', description: 'd', parameters: { type: 'object' } }], input: pcm, output: { encoding: 'opus' }, sessionId: 's1', resumeFrom: 3, context: { doc: 1 }, auth: 'token-abc' },
+  { ...transient, type: 'hello', tools: [] },
   { ...env, type: 'text', text: 'hi' },
   { ...env, type: 'interrupt', epoch: 4, reason: 'keyboard' },
   { ...env, type: 'playback', itemId: 'a1', playedMs: 320.5 },
   { ...env, type: 'tool.result', callId: 'c1', epoch: 4, ok: true, output: { done: true } },
   { ...env, type: 'tool.result', callId: 'c1', epoch: 4, ok: false, code: 'INTERRUPTED', message: 'stop' },
   { ...env, type: 'context', context: null },
-  { ...env, type: 'ack', upTo: 12 },
-  { ...env, type: 'ping' },
+  { ...transient, type: 'ack', upTo: 12 },
+  { ...transient, type: 'ping' },
 ];
 
 const serverMessages: ServerMessage[] = [
-  { ...env, type: 'ready', sessionId: 's', input: pcm, output: pcm, resumedFrom: 2 },
-  { ...env, type: 'audio.start', itemId: 'a1', responseId: 'r1', epoch: 1 },
+  { ...transient, type: 'ready', sessionId: 's', input: pcm, output: pcm, resumedFrom: 2 },
+  { ...transient, type: 'audio.start', itemId: 'a1', responseId: 'r1', epoch: 1 },
   { ...env, type: 'turn.state', turnId: 't1', epoch: 1, state: 'acting' },
   { ...env, type: 'transcript', role: 'agent', itemId: 'a1', text: 'hello', final: false },
   { ...env, type: 'text', responseId: 'r1', delta: 'x' },
   { ...env, type: 'tool.call.delta', callId: 'c1', epoch: 1, name: 'paint', preview: { partial: true } },
   { ...env, type: 'tool.call', callId: 'c1', epoch: 1, turnId: 't1', name: 'paint', arguments: { color: 'red' } },
   { ...env, type: 'interrupted', epoch: 1 },
-  { ...env, type: 'ack', upTo: 3 },
-  { ...env, type: 'pong' },
+  { ...transient, type: 'ack', upTo: 3 },
+  { ...transient, type: 'pong' },
   { ...env, type: 'error', code: 'X', message: 'm', recoverable: false },
 ];
 
@@ -150,6 +153,13 @@ describe('sequencing', () => {
     expect(out.resendFrom(1)!.map((m) => m.seq)).toEqual([2, 3]);
   });
 
+  it('refuses a resume point ahead of anything sent', () => {
+    const out = new Outbox<ServerMessage>();
+    out.stamp({ type: 'interrupted', epoch: 1 });
+    expect(out.resendFrom(1)).toEqual([]);
+    expect(out.resendFrom(2)).toBeUndefined();
+  });
+
   it('drops duplicate incoming seq and tracks the resume point', () => {
     const inbox = new Inbox();
     expect(inbox.accept({ type: 'text', seq: 1 })).toBe(true);
@@ -161,5 +171,14 @@ describe('sequencing', () => {
     // Errors sent before a session exists carry seq 0 and must never be dropped.
     expect(inbox.accept({ type: 'error', seq: 0 })).toBe(true);
     expect(inbox.accept({ type: 'error', seq: 0 })).toBe(true);
+  });
+});
+
+describe('capabilities', () => {
+  it('keeps what both sides support, once each, in the client order', () => {
+    const supported = new Set(['b', 'a']);
+    expect(negotiateCapabilities(['a', 'x', 'b', 'a'], supported)).toEqual(['a', 'b']);
+    expect(negotiateCapabilities(undefined, supported)).toEqual([]);
+    expect(negotiateCapabilities(['a'], new Set())).toEqual([]);
   });
 });

@@ -1,0 +1,11 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "server",
+  "description": "The tool.call.delta message (protocol.md §7.4).",
+  "cases": [
+    { "id": "server/tool.call.delta/arguments", "description": "A fragment of the arguments being generated.", "valid": true, "message": { "v": 1, "seq": 6, "type": "tool.call.delta", "callId": "call-1", "epoch": 2, "name": "set_color", "preview": { "argumentsDelta": "{\"col" } } },
+    { "id": "server/tool.call.delta/null", "description": "The preview may be any JSON value, including null.", "valid": true, "message": { "v": 1, "seq": 6, "type": "tool.call.delta", "callId": "call-1", "epoch": 2, "name": "set_color", "preview": null } },
+    { "id": "server/tool.call.delta/preview-missing", "description": "The preview member is required.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 6, "type": "tool.call.delta", "callId": "call-1", "epoch": 2, "name": "set_color" } }
+  ]
+}

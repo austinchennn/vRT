@@ -1,0 +1,12 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "server",
+  "description": "The transcript message.",
+  "cases": [
+    { "id": "server/transcript/user-final", "description": "What the user said.", "valid": true, "message": { "v": 1, "seq": 2, "type": "transcript", "role": "user", "itemId": "u1", "text": "make it blue", "final": true } },
+    { "id": "server/transcript/agent-interim", "description": "What the agent is saying so far.", "valid": true, "message": { "v": 1, "seq": 3, "type": "transcript", "role": "agent", "itemId": "a1", "text": "Sure", "final": false } },
+    { "id": "server/transcript/role-unknown", "description": "Only user and agent are defined.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 3, "type": "transcript", "role": "system", "itemId": "a1", "text": "x", "final": true } },
+    { "id": "server/transcript/final-missing", "description": "final is required.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 3, "type": "transcript", "role": "user", "itemId": "u1", "text": "x" } }
+  ]
+}

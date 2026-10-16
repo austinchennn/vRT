@@ -1,0 +1,42 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "client",
+  "description": "The hello message (protocol.md §5).",
+  "cases": [
+    { "id": "client/hello/minimal", "description": "A text-only client with no tools.", "valid": true, "message": { "v": 1, "seq": 0, "type": "hello", "tools": [] } },
+    {
+      "id": "client/hello/full",
+      "description": "Every optional member.",
+      "valid": true,
+      "message": {
+        "v": 1, "seq": 0, "type": "hello",
+        "tools": [{ "name": "set_color", "description": "Change the accent color", "parameters": { "type": "object", "properties": { "color": { "type": "string" } }, "required": ["color"] } }],
+        "input": { "encoding": "pcm16", "sampleRate": 16000 },
+        "output": { "encoding": "opus" },
+        "capabilities": ["tool-stream-v1", "x-acme.beta"],
+        "context": { "doc": "q3-plan", "revision": 4 },
+        "auth": "eyJhbGciOi.short-lived"
+      }
+    },
+    { "id": "client/hello/resume", "description": "Resuming a session.", "valid": true, "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "sessionId": "8c1e2f6a", "resumeFrom": 41 } },
+    { "id": "client/hello/context-null", "description": "Context may be any JSON value, including null.", "valid": true, "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "context": null } },
+    { "id": "client/hello/unknown-member", "description": "Unknown members are ignored, so a later minor revision can add them.", "valid": true, "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "device": { "kind": "lamp" } } },
+    { "id": "client/hello/unknown-capability", "description": "Unknown capabilities are valid tokens; the server ignores them.", "valid": true, "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "capabilities": ["future-thing.v9"] } },
+    { "id": "client/hello/seq-positive", "description": "hello is transient and carries seq 0.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 1, "type": "hello", "tools": [] } },
+    { "id": "client/hello/tools-missing", "description": "tools is required, even when empty.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello" } },
+    { "id": "client/hello/tools-object", "description": "tools is a list.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": { "set_color": {} } } },
+    { "id": "client/hello/tool-name-missing", "description": "A tool needs a name.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [{ "description": "d", "parameters": {} }] } },
+    { "id": "client/hello/tool-name-empty", "description": "A tool name is not empty.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [{ "name": "", "description": "d", "parameters": {} }] } },
+    { "id": "client/hello/tool-description-missing", "description": "A tool needs a description, possibly empty.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [{ "name": "a", "parameters": {} }] } },
+    { "id": "client/hello/tool-parameters-array", "description": "Tool parameters are a JSON Schema object.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [{ "name": "a", "description": "", "parameters": [] }] } },
+    { "id": "client/hello/encoding-unknown", "description": "Only pcm16, opus and pcmu are defined.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "input": { "encoding": "mp3" } } },
+    { "id": "client/hello/sample-rate-zero", "description": "A sample rate is positive.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "input": { "encoding": "pcm16", "sampleRate": 0 } } },
+    { "id": "client/hello/sample-rate-fraction", "description": "A sample rate is an integer.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "output": { "encoding": "pcm16", "sampleRate": 22050.5 } } },
+    { "id": "client/hello/session-id-empty", "description": "A session id is not empty.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "sessionId": "" } },
+    { "id": "client/hello/resume-from-negative", "description": "resumeFrom is unsigned.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "sessionId": "s", "resumeFrom": -1 } },
+    { "id": "client/hello/capabilities-string", "description": "capabilities is a list.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "capabilities": "tool-stream-v1" } },
+    { "id": "client/hello/capability-uppercase", "description": "Capability tokens are lowercase.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "capabilities": ["Tool-Stream"] } },
+    { "id": "client/hello/auth-number", "description": "auth is a string.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "auth": 42 } }
+  ]
+}

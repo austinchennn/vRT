@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/server/tool.call.delta.json",
+  "title": "tool.call.delta",
+  "description": "Progress of a tool call, for display only. Receivers never act on it (protocol.md §7.4).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sequencedEnvelope" }],
+  "properties": {
+    "type": { "const": "tool.call.delta" },
+    "callId": { "$ref": "../common.json#/$defs/identifier" },
+    "epoch": { "$ref": "../common.json#/$defs/epoch" },
+    "name": { "$ref": "../common.json#/$defs/identifier" },
+    "preview": { "$ref": "../common.json#/$defs/json" }
+  },
+  "required": ["type", "callId", "epoch", "name", "preview"]
+}

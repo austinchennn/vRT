@@ -1,0 +1,16 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "server",
+  "description": "The ready message (protocol.md §5).",
+  "cases": [
+    { "id": "server/ready/new", "description": "A new session.", "valid": true, "message": { "v": 1, "seq": 0, "type": "ready", "sessionId": "8c1e2f6a", "input": { "encoding": "pcm16", "sampleRate": 24000 }, "output": { "encoding": "pcm16", "sampleRate": 24000 } } },
+    { "id": "server/ready/resumed", "description": "A resumed session.", "valid": true, "message": { "v": 1, "seq": 0, "type": "ready", "sessionId": "8c1e2f6a", "input": { "encoding": "opus" }, "output": { "encoding": "pcmu" }, "resumedFrom": 17 } },
+    { "id": "server/ready/capabilities", "description": "Capabilities in effect for the session.", "valid": true, "message": { "v": 1, "seq": 0, "type": "ready", "sessionId": "s", "input": { "encoding": "pcm16" }, "output": { "encoding": "pcm16" }, "capabilities": ["tool-stream-v1"] } },
+    { "id": "server/ready/seq-positive", "description": "ready is transient and carries seq 0.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 2, "type": "ready", "sessionId": "s", "input": { "encoding": "pcm16" }, "output": { "encoding": "pcm16" } } },
+    { "id": "server/ready/input-missing", "description": "The negotiated input format is required.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "ready", "sessionId": "s", "output": { "encoding": "pcm16" } } },
+    { "id": "server/ready/output-encoding-unknown", "description": "Only pcm16, opus and pcmu are defined.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "ready", "sessionId": "s", "input": { "encoding": "pcm16" }, "output": { "encoding": "aac" } } },
+    { "id": "server/ready/session-id-empty", "description": "A session id is not empty.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "ready", "sessionId": "", "input": { "encoding": "pcm16" }, "output": { "encoding": "pcm16" } } },
+    { "id": "server/ready/resumed-from-negative", "description": "resumedFrom is unsigned.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "ready", "sessionId": "s", "input": { "encoding": "pcm16" }, "output": { "encoding": "pcm16" }, "resumedFrom": -1 } }
+  ]
+}

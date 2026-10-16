@@ -1,0 +1,13 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "client",
+  "description": "The client ack message (protocol.md §4.2).",
+  "cases": [
+    { "id": "client/ack/zero", "description": "Nothing handled yet.", "valid": true, "message": { "v": 1, "seq": 0, "type": "ack", "upTo": 0 } },
+    { "id": "client/ack/max", "description": "The largest sequence number.", "valid": true, "message": { "v": 1, "seq": 0, "type": "ack", "upTo": 4294967295 } },
+    { "id": "client/ack/seq-positive", "description": "ack is transient and carries seq 0.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 5, "type": "ack", "upTo": 3 } },
+    { "id": "client/ack/up-to-negative", "description": "upTo is unsigned.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "ack", "upTo": -1 } },
+    { "id": "client/ack/up-to-missing", "description": "upTo is required.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "ack" } }
+  ]
+}

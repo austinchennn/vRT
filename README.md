@@ -8,7 +8,7 @@ vRealTime lets people talk to software and devices the way they talk to each oth
 
 vRealTime is protocol-first. The vRT protocol (WebSocket, JSON control messages, binary audio frames) is the contract. This repository holds the TypeScript reference implementation of the server runtime and the first client SDK. Clients are deliberately thin, so they can be written in any language, down to microcontrollers.
 
-- **Protocol-first**: a language-neutral spec and a conformance suite define what "compatible" means, whatever language an implementation is written in (in progress: #16, #17).
+- **Protocol-first**: a language-neutral [spec](spec/) (prose, JSON Schemas and test vectors) and a conformance suite define what "compatible" means, whatever language an implementation is written in (conformance suite in progress: #17).
 - **Any language, any device**: TypeScript client today; Python next (#18); Swift, Kotlin and C for ESP32-class devices planned.
 - **Tools run in your app or device**: with strict interrupt guarantees. Once the user interrupts, nothing from that turn takes effect, whether it edits a document or unlocks a door.
 - **Any model**: Boson Higgs Realtime, OpenAI Realtime, Gemini Live, or any text LLM plus STT and TTS through `cascade()`.
@@ -28,7 +28,7 @@ serve(defineAgent({
 }), { port: 8790, publicDir: new URL('./public', import.meta.url) });
 ```
 
-> Status: M0 and M2 are implemented in this repo: core runtime, protocol, Boson / OpenAI / Gemini adapters, cascade (STT + any AI SDK model + TTS), VAD, Node / Workers server, browser client and React hooks. The language-neutral spec, conformance suite and Python client SDK are in progress (M1). Packages are not published yet.
+> Status: M0 and M2 are implemented in this repo: core runtime, protocol, Boson / OpenAI / Gemini adapters, cascade (STT + any AI SDK model + TTS), VAD, Node / Workers server, browser client and React hooks. The language-neutral [protocol spec](spec/) is written; the conformance suite and Python client SDK are in progress (M1). Packages are not published yet.
 
 ## How it fits together
 
@@ -147,12 +147,13 @@ Install each package together with the `@vrealtime/*` packages it depends on, as
 ## Development
 
 ```bash
-npm run typecheck && npm test && npm run test:e2e
+npm run check:spec && npm run typecheck && npm test && npm run test:e2e
 npm run build && npm run check:budgets && npm run bench
 ```
 
 ## Design
 
+- [Protocol specification](spec/): the wire protocol every implementation follows, with JSON Schemas and test vectors
 - [Architecture](docs/ARCHITECTURE.md) (Chinese)
 
 ## Roadmap
@@ -170,7 +171,7 @@ npm run build && npm run check:budgets && npm run bench
 | Package | Purpose |
 |---|---|
 | `@vrealtime/core` | Model interface, normalized events, agent runtime, tools, hooks |
-| `@vrealtime/protocol` | Wire protocol v1 between apps and a vRealTime server |
+| `@vrealtime/protocol` | Wire protocol v1 between apps and a vRealTime server (implements [spec/](spec/)) |
 | `@vrealtime/boson`, `@vrealtime/openai`, `@vrealtime/gemini` | Provider adapters (Boson Higgs Realtime, OpenAI Realtime, Gemini Live) |
 | `@vrealtime/server` | Attach any WebSocket; Node `serve()` with a debug page; Workers / Durable Objects `upgrade()` |
 | `@vrealtime/client` | Browser SDK: app-side tools with the epoch gate, mic and playback |

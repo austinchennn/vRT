@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/server/ready.json",
+  "title": "ready",
+  "description": "The session is open (new or resumed). The client may send sequenced messages and audio from now on (protocol.md §5).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/transientEnvelope" }],
+  "properties": {
+    "type": { "const": "ready" },
+    "sessionId": { "$ref": "../common.json#/$defs/identifier" },
+    "input": { "$ref": "../common.json#/$defs/audioFormat", "description": "The format the client must send audio in." },
+    "output": { "$ref": "../common.json#/$defs/audioFormat", "description": "The format of audio the server will send." },
+    "resumedFrom": { "$ref": "../common.json#/$defs/uint32", "description": "Present only on a resume: the highest client seq the server has handled." },
+    "capabilities": { "$ref": "../common.json#/$defs/capabilities", "description": "The capabilities in effect for this session. Absent means none." }
+  },
+  "required": ["type", "sessionId", "input", "output"]
+}

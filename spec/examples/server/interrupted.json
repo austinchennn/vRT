@@ -1,0 +1,10 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "server",
+  "description": "The interrupted message (protocol.md §6.2).",
+  "cases": [
+    { "id": "server/interrupted/basic", "description": "Epoch 2 and every earlier one are closed.", "valid": true, "message": { "v": 1, "seq": 8, "type": "interrupted", "epoch": 2 } },
+    { "id": "server/interrupted/epoch-string", "description": "epoch is a number.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 8, "type": "interrupted", "epoch": "2" } }
+  ]
+}

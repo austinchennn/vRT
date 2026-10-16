@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/client/context.json",
+  "title": "context",
+  "description": "Replaces the application data of the session, for example the document now open. Data, never instructions (protocol.md §5.5).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sequencedEnvelope" }],
+  "properties": {
+    "type": { "const": "context" },
+    "context": { "$ref": "../common.json#/$defs/json" }
+  },
+  "required": ["type", "context"]
+}

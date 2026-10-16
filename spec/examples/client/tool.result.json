@@ -1,0 +1,24 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "client",
+  "description": "The tool.result message (protocol.md §7.2).",
+  "cases": [
+    { "id": "client/tool.result/ok-object", "description": "A successful call.", "valid": true, "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": true, "output": { "applied": true } } },
+    { "id": "client/tool.result/ok-null", "description": "A tool that returned nothing answers with output null.", "valid": true, "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": true, "output": null } },
+    { "id": "client/tool.result/ok-false-output", "description": "Any JSON output, including false.", "valid": true, "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": true, "output": false } },
+    { "id": "client/tool.result/interrupted", "description": "A call from a closed epoch.", "valid": true, "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": false, "code": "INTERRUPTED", "message": "Interrupted before it started" } },
+    { "id": "client/tool.result/rejected", "description": "The user declined.", "valid": true, "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": false, "code": "REJECTED", "message": "" } },
+    { "id": "client/tool.result/invalid", "description": "Bad arguments.", "valid": true, "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": false, "code": "INVALID", "message": "color is required" } },
+    { "id": "client/tool.result/timeout", "description": "The tool timed out.", "valid": true, "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": false, "code": "TIMEOUT", "message": "timed out" } },
+    { "id": "client/tool.result/failed", "description": "The tool threw.", "valid": true, "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": false, "code": "FAILED", "message": "boom" } },
+    { "id": "client/tool.result/unknown-member", "description": "Unknown members are ignored.", "valid": true, "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": true, "output": 1, "durationMs": 12 } },
+    { "id": "client/tool.result/ok-output-missing", "description": "A successful result carries output, null when there is none.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": true } },
+    { "id": "client/tool.result/failure-code-missing", "description": "A failure carries a code.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": false, "message": "boom" } },
+    { "id": "client/tool.result/failure-code-unknown", "description": "Failure codes are a closed set.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": false, "code": "NOPE", "message": "x" } },
+    { "id": "client/tool.result/failure-message-missing", "description": "A failure carries a message.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": false, "code": "FAILED" } },
+    { "id": "client/tool.result/ok-string", "description": "ok is a boolean.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "epoch": 2, "ok": "true", "output": 1 } },
+    { "id": "client/tool.result/call-id-empty", "description": "A call id is not empty.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "", "epoch": 2, "ok": true, "output": 1 } },
+    { "id": "client/tool.result/epoch-missing", "description": "epoch is required.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 6, "type": "tool.result", "callId": "call-1", "ok": true, "output": 1 } }
+  ]
+}

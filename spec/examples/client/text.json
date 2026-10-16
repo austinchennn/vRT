@@ -1,0 +1,13 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "client",
+  "description": "The client text message.",
+  "cases": [
+    { "id": "client/text/basic", "description": "User text input.", "valid": true, "message": { "v": 1, "seq": 1, "type": "text", "text": "Make the title blue" } },
+    { "id": "client/text/empty", "description": "Empty text is valid.", "valid": true, "message": { "v": 1, "seq": 2, "type": "text", "text": "" } },
+    { "id": "client/text/seq-zero", "description": "Sequenced messages start at seq 1; seq 0 would bypass deduplication.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "text", "text": "hi" } },
+    { "id": "client/text/text-missing", "description": "text is required.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 1, "type": "text" } },
+    { "id": "client/text/text-number", "description": "text is a string.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 1, "type": "text", "text": 3 } }
+  ]
+}

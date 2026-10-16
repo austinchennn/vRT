@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/client/hello.json",
+  "title": "hello",
+  "description": "First message on every connection: opens a new session or resumes one (protocol.md §5).",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/transientEnvelope" }],
+  "properties": {
+    "type": { "const": "hello" },
+    "tools": {
+      "description": "Tools the client hosts. Names must be unique within the list.",
+      "type": "array",
+      "items": { "$ref": "../common.json#/$defs/toolSpec" }
+    },
+    "input": { "$ref": "../common.json#/$defs/audioFormat", "description": "Preferred format for audio the client will send." },
+    "output": { "$ref": "../common.json#/$defs/audioFormat", "description": "Preferred format for audio the client will play." },
+    "sessionId": { "$ref": "../common.json#/$defs/identifier", "description": "Present when resuming: the session to resume." },
+    "resumeFrom": { "$ref": "../common.json#/$defs/uint32", "description": "With sessionId: the highest server seq the client has handled. Absent means 0." },
+    "capabilities": { "$ref": "../common.json#/$defs/capabilities", "description": "Optional capabilities the client supports. Absent means none." },
+    "context": { "$ref": "../common.json#/$defs/json", "description": "Application data for the new session. Data, never instructions." },
+    "auth": { "type": "string", "description": "A short-lived credential, sent here and never in the connection URL." }
+  },
+  "required": ["type", "tools"]
+}

@@ -1,8 +1,14 @@
-import { PROTOCOL_VERSION, decodeAudioFrame, encodeAudioFrame, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
+import { PROTOCOL_VERSION, decodeAudioFrame, decodeClientMessage, encodeAudioFrame, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connect, type AudioSink, type ClientEvent, type ClientSession, type ConnectOptions } from '../src/index.js';
 
 type Listener = (event: any) => void;
+
+/** Every control frame the client sends must be a valid client message (spec/). */
+const offSpec: string[] = [];
+afterEach(() => {
+  expect(offSpec.splice(0)).toEqual([]);
+});
 
 class FakeSocket {
   static instances: FakeSocket[] = [];
@@ -19,6 +25,8 @@ class FakeSocket {
     (this.#listeners[type] ??= []).push(listener);
   }
   send(data: string | Uint8Array) {
+    const decoded = typeof data === 'string' ? decodeClientMessage(data) : undefined;
+    if (decoded && !decoded.ok) offSpec.push(`${decoded.error.message}: ${data}`);
     this.sent.push(data);
   }
   close(code?: number, reason?: string) {
@@ -185,6 +193,15 @@ describe('tool host', () => {
     await flush();
     expect(run).not.toHaveBeenCalled();
     expect(events.some((e) => e.type === 'interrupted')).toBe(true);
+  });
+
+  it('answers a tool that returns nothing with output null, and sends a cleared context as null', async () => {
+    const { session, socket } = await start({ tools: { fire: { parameters: {}, run: () => undefined } } });
+    socket.server({ type: 'tool.call', callId: 'c1', epoch: 1, turnId: 't', name: 'fire', arguments: {} });
+    await flush();
+    expect(socket.ofType('tool.result')[0]).toMatchObject({ callId: 'c1', ok: true, output: null });
+    session.setContext(undefined);
+    expect(socket.ofType('context')).toMatchObject([{ context: null }]);
   });
 
   it('reports unknown tools, thrown errors and previews', async () => {

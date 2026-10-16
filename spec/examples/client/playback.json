@@ -1,0 +1,13 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "client",
+  "description": "The playback message (protocol.md §8.4).",
+  "cases": [
+    { "id": "client/playback/fraction", "description": "Played milliseconds may be fractional.", "valid": true, "message": { "v": 1, "seq": 5, "type": "playback", "itemId": "item-1", "playedMs": 320.5 } },
+    { "id": "client/playback/zero", "description": "Nothing was heard.", "valid": true, "message": { "v": 1, "seq": 5, "type": "playback", "itemId": "item-1", "playedMs": 0 } },
+    { "id": "client/playback/negative", "description": "Played milliseconds are not negative.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 5, "type": "playback", "itemId": "item-1", "playedMs": -10 } },
+    { "id": "client/playback/item-empty", "description": "An item id is not empty.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 5, "type": "playback", "itemId": "", "playedMs": 10 } },
+    { "id": "client/playback/played-string", "description": "playedMs is a number.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 5, "type": "playback", "itemId": "item-1", "playedMs": "10" } }
+  ]
+}

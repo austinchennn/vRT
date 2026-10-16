@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/schema/server/transcript.json",
+  "title": "transcript",
+  "description": "Transcript of user or agent speech. Interim updates have final false; the last update of an item has final true.",
+  "type": "object",
+  "allOf": [{ "$ref": "../common.json#/$defs/sequencedEnvelope" }],
+  "properties": {
+    "type": { "const": "transcript" },
+    "role": { "enum": ["user", "agent"] },
+    "itemId": { "$ref": "../common.json#/$defs/identifier" },
+    "text": { "type": "string" },
+    "final": { "type": "boolean" }
+  },
+  "required": ["type", "role", "itemId", "text", "final"]
+}

@@ -46,9 +46,12 @@ export class Outbox<M extends Message> {
     if (drop > 0) this.#unacked.splice(0, drop);
   }
 
-  /** Messages after `lastSeen` for resend, or undefined when some of them were already dropped. */
+  /**
+   * Messages after `lastSeen` for resend, or undefined when the resume cannot be honored:
+   * some of them were already dropped, or `lastSeen` is ahead of anything sent.
+   */
   resendFrom(lastSeen: number): M[] | undefined {
-    if (lastSeen < this.#droppedUpTo) return undefined;
+    if (lastSeen < this.#droppedUpTo || lastSeen > this.#seq) return undefined;
     return this.#unacked.filter((message) => message.seq > lastSeen);
   }
 }

@@ -1,0 +1,11 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "client",
+  "description": "The ping message (protocol.md §4.4).",
+  "cases": [
+    { "id": "client/ping/basic", "description": "Heartbeat.", "valid": true, "message": { "v": 1, "seq": 0, "type": "ping" } },
+    { "id": "client/ping/unknown-member", "description": "Unknown members are ignored.", "valid": true, "message": { "v": 1, "seq": 0, "type": "ping", "sentAt": 1700000000000 } },
+    { "id": "client/ping/seq-positive", "description": "ping is transient and carries seq 0.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 1, "type": "ping" } }
+  ]
+}

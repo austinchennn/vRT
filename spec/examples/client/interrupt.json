@@ -1,0 +1,14 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "client",
+  "description": "The interrupt message (protocol.md §6.2).",
+  "cases": [
+    { "id": "client/interrupt/user", "description": "The user pressed stop.", "valid": true, "message": { "v": 1, "seq": 3, "type": "interrupt", "epoch": 4, "reason": "user" } },
+    { "id": "client/interrupt/speech", "description": "Local voice activity detection heard the user.", "valid": true, "message": { "v": 1, "seq": 3, "type": "interrupt", "epoch": 4, "reason": "speech" } },
+    { "id": "client/interrupt/keyboard-epoch-zero", "description": "Epoch 0 is valid.", "valid": true, "message": { "v": 1, "seq": 3, "type": "interrupt", "epoch": 0, "reason": "keyboard" } },
+    { "id": "client/interrupt/reason-unknown", "description": "Only speech, user and keyboard are defined.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 3, "type": "interrupt", "epoch": 4, "reason": "timeout" } },
+    { "id": "client/interrupt/epoch-negative", "description": "Epochs are unsigned.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 3, "type": "interrupt", "epoch": -1, "reason": "user" } },
+    { "id": "client/interrupt/epoch-missing", "description": "epoch is required.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 3, "type": "interrupt", "reason": "user" } }
+  ]
+}

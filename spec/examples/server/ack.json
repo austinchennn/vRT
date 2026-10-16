@@ -1,0 +1,11 @@
+{
+  "$schema": "../vectors.schema.json",
+  "suite": "control",
+  "direction": "server",
+  "description": "The server ack message (protocol.md §4.2).",
+  "cases": [
+    { "id": "server/ack/basic", "description": "Client messages up to seq 9 were handled.", "valid": true, "message": { "v": 1, "seq": 0, "type": "ack", "upTo": 9 } },
+    { "id": "server/ack/seq-positive", "description": "ack is transient and carries seq 0.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 9, "type": "ack", "upTo": 9 } },
+    { "id": "server/ack/up-to-fraction", "description": "upTo is an integer.", "valid": false, "error": "INVALID_FIELD", "message": { "v": 1, "seq": 0, "type": "ack", "upTo": 1.5 } }
+  ]
+}

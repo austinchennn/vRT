@@ -170,8 +170,9 @@ export class ClientSession {
     this.#send({ type: 'text', text });
   }
 
+  /** Replaces the app context on the server; `undefined` clears it (sent as null). */
   setContext(context: unknown): void {
-    this.#send({ type: 'context', context });
+    this.#send({ type: 'context', context: context ?? null });
   }
 
   /**
@@ -452,8 +453,9 @@ export class ClientSession {
   }
 
   #result(call: PendingCall, result: ToolOutcome): void {
+    // A tool that returns nothing answers with output null: the member is required on the wire.
     this.#send(result.ok
-      ? { type: 'tool.result', callId: call.callId, epoch: call.epoch, ok: true, output: result.output }
+      ? { type: 'tool.result', callId: call.callId, epoch: call.epoch, ok: true, output: result.output ?? null }
       : { type: 'tool.result', callId: call.callId, epoch: call.epoch, ok: false, code: result.code, message: result.message });
     this.#emitter.emit({ type: 'tool.result', callId: call.callId, name: call.name, turnId: call.turnId, epoch: call.epoch, result });
   }
