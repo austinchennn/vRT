@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { PROTOCOL_VERSION, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
+import { PROTOCOL_VERSION, TRANSIENT_TYPES, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useRealtime, type UseRealtimeOptions } from '../src/index.js';
@@ -34,8 +34,7 @@ class FakeSocket {
     this.#fire('close', { code });
   }
   server(message: Unsequenced<ServerMessage>) {
-    const transient = ['ready', 'audio.start', 'ack', 'pong'].includes(message.type);
-    this.#fire('message', { data: JSON.stringify({ v: PROTOCOL_VERSION, seq: transient ? 0 : ++this.#seq, ...message }) });
+    this.#fire('message', { data: JSON.stringify({ v: PROTOCOL_VERSION, seq: TRANSIENT_TYPES.has(message.type) ? 0 : ++this.#seq, ...message }) });
   }
   ofType(type: string) {
     return this.sent.map((d) => JSON.parse(d)).filter((m) => m.type === type);
