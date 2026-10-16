@@ -7,6 +7,7 @@ This directory is the single source of truth for the vRT wire protocol. Every im
 | [`protocol.md`](protocol.md) | The normative specification: transport, reliability, sessions, epochs, tools, audio, errors. |
 | [`schema/`](schema/) | JSON Schemas (draft 2020-12) for every control message. |
 | [`examples/`](examples/) | Test vectors: valid and invalid control messages, and binary audio frames, with expected outcomes. |
+| [`capabilities.json`](capabilities.json) | The capability registry: every standard optional feature and the messages it gates. |
 
 Protocol version 1, revision 1.1. See [Appendix B](protocol.md#appendix-b-revision-history) for the history.
 
@@ -59,6 +60,18 @@ A protocol change is a change to this directory first:
 2. Update the schemas and add vectors: at least one valid and one invalid case for every message type, including the members you changed.
 3. Update the implementations to match.
 
-`npm run check:spec` checks that the spec is self-consistent: every schema compiles in strict mode, the two message schemas dispatch to every per-message schema, every vector file is well-formed, every vector agrees with the schemas, every invalid vector's `error` follows the classification order, and every message type has both valid and invalid vectors. `npm test` checks the TypeScript implementation against the vectors and the schemas. CI runs both.
+### Adding a capability
+
+Optional features are added as capabilities, so that peers without them keep working:
+
+1. Pick a token, by convention `<name>-v1`, and add an entry to `capabilities.json` with `status` `draft`, the next revision in `since`, and the message types it gates.
+2. Specify it in a new subsection of `protocol.md` and point the entry's `specification` at that subsection.
+3. Add schemas for its new message types to `schema/client/` or `schema/server/` and to the direction's message schema, with valid and invalid vectors. New optional members of existing messages need no registry entry, because receivers ignore unknown members.
+4. Implementations offer the token only once they implement it in full. Their tests check that they only claim registered tokens.
+5. Mark it `stable` once two implementations interoperate on it (for example the reference server and a second client SDK, checked by the conformance suite). After that the token is frozen.
+
+### Checks
+
+`npm run check:spec` checks that the spec is self-consistent: every schema compiles in strict mode, the two message schemas dispatch to every per-message schema, the capability registry is well-formed and every message type it gates exists, every link between spec documents resolves, every vector file is well-formed, every vector agrees with the schemas, every invalid vector's `error` follows the classification order, and every message type has both valid and invalid vectors. `npm test` checks the TypeScript implementation against the vectors and the schemas. CI runs both.
 
 Nothing in this directory may depend on a particular implementation's types or APIs.

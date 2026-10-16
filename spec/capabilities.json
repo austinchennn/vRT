@@ -1,0 +1,5 @@
+{
+  "$schema": "./capabilities.schema.json",
+  "description": "Every standard capability (protocol.md §3.4). Implementations offer only tokens listed here, or private tokens starting with x-.",
+  "capabilities": []
+}

@@ -93,7 +93,19 @@ A capability names an optional feature. Tokens are lowercase ASCII words separat
 4. A peer MUST NOT send any message, member value or behaviour that a capability gates unless that capability is in effect.
 5. Receivers MUST ignore capability tokens they do not recognise.
 
-This revision defines no capabilities; every behaviour in this document is baseline and always in effect.
+The registry (§3.4) lists no capabilities in this revision: every behaviour in this document is baseline and always in effect.
+
+### 3.4 Capability registry
+
+[`capabilities.json`](capabilities.json) lists every standard capability, in the format of [`capabilities.schema.json`](capabilities.schema.json). Each entry gives:
+
+- the `token`;
+- its `status`: `draft` (may still change incompatibly), `stable` (frozen) or `deprecated` (still honoured, no longer offered by new implementations);
+- the revision that added it (`since`);
+- the section of this document that specifies it;
+- the message types that exist only while it is in effect (`messages`).
+
+A message type listed under a capability MUST NOT be sent unless that capability is in effect. Every other message type is baseline. Implementations MUST NOT offer an unregistered token other than a private `x-` token. A capability's token never changes meaning: an incompatible change to a `stable` capability is a new token (by convention `<name>-v<N+1>`), and peers may support both during a transition.
 
 ## 4. Reliability
 
@@ -442,7 +454,7 @@ This version sets no maximum message size, tool count or queue length. Implement
 
 - First normative, language-neutral edition: this document, the JSON Schemas and the test vectors.
 - Added `hello.auth` (§5.3) and `seq` 0 for errors sent before a session exists (§4.1).
-- Added capability negotiation: `hello.capabilities`, `ready.capabilities` (§3.3).
+- Added capability negotiation: `hello.capabilities`, `ready.capabilities` (§3.3), and the capability registry (§3.4).
 - Made explicit what 1.0 senders already did: transient messages carry `seq` 0 and sequenced ones start at 1; required members are present even when `null`; identifiers are non-empty; `playedMs` is non-negative; `sampleRate` is positive; error codes are upper-case; a resume from a `seq` the peer never sent fails.
 
 **1.0** (2026-10-15): initial protocol, defined by the TypeScript reference implementation.

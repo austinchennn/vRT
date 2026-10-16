@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/austinchennn/vRT/main/spec/capabilities.schema.json",
+  "title": "vRT capability registry",
+  "description": "Format of spec/capabilities.json (protocol.md §3.4).",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" },
+    "description": { "type": "string" },
+    "capabilities": { "type": "array", "items": { "$ref": "#/$defs/capability" } }
+  },
+  "required": ["description", "capabilities"],
+  "additionalProperties": false,
+  "$defs": {
+    "messageTypes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "capability": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "$ref": "schema/common.json#/$defs/capability",
+          "description": "The token offered in hello.capabilities. Private x- tokens are never registered."
+        },
+        "status": {
+          "description": "draft: may still change incompatibly; stable: frozen; deprecated: still honoured, no longer offered by new implementations.",
+          "enum": ["draft", "stable", "deprecated"]
+        },
+        "since": { "description": "The protocol revision that added it.", "type": "string", "pattern": "^1\\.[0-9]+$" },
+        "summary": { "type": "string", "minLength": 1 },
+        "specification": { "description": "The section of protocol.md that specifies it.", "type": "string", "pattern": "^protocol\\.md#[a-z0-9-]+$" },
+        "messages": {
+          "description": "Message types that exist only when this capability is in effect.",
+          "type": "object",
+          "properties": {
+            "client": { "$ref": "#/$defs/messageTypes" },
+            "server": { "$ref": "#/$defs/messageTypes" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["token", "status", "since", "summary", "specification"],
+      "additionalProperties": false
+    }
+  }
+}

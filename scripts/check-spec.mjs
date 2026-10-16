@@ -1,13 +1,19 @@
 // Checks that spec/ is self-consistent, independently of any implementation:
 // schemas compile in strict mode, the union schemas cover every message schema,
-// every vector file is well-formed, and every vector agrees with the schemas.
+// the capability registry is coherent, every vector file is well-formed, every
+// vector agrees with the schemas, and every link between spec documents resolves.
 // Implementations are checked against the vectors by their own tests.
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import {
   DIRECTIONS,
+  PROTOCOL_DOC,
+  SPEC_DIR,
   audioCases,
   caseValue,
   controlCases,
   createValidator,
+  loadCapabilityRegistry,
   loadSchemas,
   loadVectorFiles,
   messageSchemaPath,
@@ -46,6 +52,55 @@ for (const direction of DIRECTIONS) {
     if (branches.get(type) !== path) fail(`${messageSchemaPath(direction)}: "${type}" must dispatch to ${path}, found ${branches.get(type)}`);
   }
   for (const type of listed) if (!byType.has(type)) fail(`${messageSchemaPath(direction)}: "${type}" has no schema in ${direction}/`);
+}
+
+// ── Capability registry (protocol.md §3.4) ───────────────────────────────
+
+const registry = loadCapabilityRegistry();
+const registryFormat = validator.capabilityRegistry(registry);
+if (!registryFormat.valid) fail(`spec/capabilities.json: ${registryFormat.errors}`);
+else {
+  const tokens = new Set();
+  const gatedBy = new Map();
+  for (const { token, specification, messages = {} } of registry.capabilities) {
+    if (tokens.has(token)) fail(`spec/capabilities.json: duplicate token ${token}`);
+    if (token.startsWith('x-')) fail(`spec/capabilities.json: ${token} is private; x- tokens are never registered`);
+    tokens.add(token);
+    const anchor = specification.slice(specification.indexOf('#') + 1);
+    if (!anchorsOf(PROTOCOL_DOC).has(anchor)) fail(`spec/capabilities.json: ${token} points to a missing section ${specification}`);
+    for (const direction of DIRECTIONS) {
+      for (const type of messages[direction] ?? []) {
+        if (!typesByDirection.get(direction).has(type)) fail(`spec/capabilities.json: ${token} gates ${direction} "${type}", which has no schema`);
+        const key = `${direction}/${type}`;
+        if (gatedBy.has(key)) fail(`spec/capabilities.json: ${key} is gated by both ${gatedBy.get(key)} and ${token}`);
+        gatedBy.set(key, token);
+      }
+    }
+  }
+}
+
+// ── Links between spec documents ─────────────────────────────────────────
+
+const LINK = /\]\(([^)\s]+)\)/g;
+for (const doc of readdirSync(SPEC_DIR).filter((name) => name.endsWith('.md')).map((name) => join(SPEC_DIR, name))) {
+  for (const [, target] of readFileSync(doc, 'utf8').matchAll(LINK)) {
+    if (/^[a-z]+:/.test(target)) continue;
+    const [path, anchor] = target.split('#');
+    const file = path ? join(dirname(doc), path) : doc;
+    const where = `spec/${relative(SPEC_DIR, doc)}: link ${target}`;
+    if (!existsSync(file)) fail(`${where} points to a missing file`);
+    else if (anchor && file.endsWith('.md') && !anchorsOf(file).has(anchor)) fail(`${where} points to a missing section`);
+  }
+}
+
+/** GitHub-style heading anchors of a Markdown file. */
+function anchorsOf(file) {
+  return new Set(
+    readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((line) => /^#{1,6} /.test(line))
+      .map((line) => line.replace(/^#+ /, '').trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s/g, '-')),
+  );
 }
 
 // ── Vector files ─────────────────────────────────────────────────────────
@@ -115,7 +170,7 @@ for (const testCase of audios) {
 }
 
 exitOnFailures();
-console.log(`✓ spec ok: ${schemas.size} schemas, ${controls.length} control vectors, ${audios.length} audio vectors`);
+console.log(`✓ spec ok: ${schemas.size} schemas, ${registry.capabilities.length} registered capabilities, ${controls.length} control vectors, ${audios.length} audio vectors`);
 
 function exitOnFailures() {
   if (failures.length === 0) return;
