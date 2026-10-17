@@ -29,6 +29,7 @@ export class Peer {
   #notify(): void { for (const changed of [...this.#changed]) changed(); }
   send(message: Wire): void { this.socket.send(JSON.stringify(message)); }
   sendRaw(text: string): void { this.socket.send(text); }
+  sendBinary(bytes: Uint8Array): void { this.socket.send(bytes, { binary: true }); }
   async expect(predicate: (m: Wire) => boolean, end: number, stage: string, after = 0): Promise<Wire> {
     const found = deferred<Wire>();
     const check = () => {

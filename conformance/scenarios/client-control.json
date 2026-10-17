@@ -1,0 +1,27 @@
+[
+  {
+    "profile": "client-control-validation-v1",
+    "id": "client/control/framing",
+    "expected": "Malformed JSON/nonobjects report MALFORMED; no business effects; legal call still works"
+  },
+  {
+    "profile": "client-control-validation-v1",
+    "id": "client/control/version",
+    "expected": "Invalid versions precede type/field classification; no state pollution"
+  },
+  {
+    "profile": "client-control-validation-v1",
+    "id": "client/control/types",
+    "expected": "Exact type/direction matching reports UNKNOWN_TYPE before fields"
+  },
+  {
+    "profile": "client-control-validation-v1",
+    "id": "client/control/fields",
+    "expected": "Illegal fields/seq never advance the receive cursor or close epochs"
+  },
+  {
+    "profile": "client-control-validation-v1",
+    "id": "client/control/state-call",
+    "expected": "Invalid state/call does not execute, reserve callId or raise observed epoch"
+  }
+]
