@@ -1,8 +1,9 @@
 # Python protocol foundation
 
-This is the stateless foundation for [#18](https://github.com/austinchennn/vRT/issues/18),
+This is the protocol foundation for [#18](https://github.com/austinchennn/vRT/issues/18),
 not yet a Python client SDK. Python 3.10 or later; standard library only at runtime.
-No WebSocket connection, session state, reliability/ACK queue, tool executor,
+Includes stateless codecs and in-memory control-stream state. No WebSocket connection,
+session lifecycle, tool executor,
 reconnects, device audio or provider adapters. Nothing is published to PyPI here.
 
 ## Use from a checkout
@@ -42,7 +43,8 @@ caller error (`ValueError`). Audio errors use `MALFORMED` (§8.1).
 - Both directions' current message structures are supported, including every
   `tool.stream` phase. This does **not** advertise `tool-stream-v1`, negotiate it,
   or validate phase ordering. A future session layer must enforce capabilities,
-  epochs, sequencing, authentication, ACK bounds and tool execution rules.
+  epochs, authentication and tool execution rules. The new sequence helpers handle
+  only their own direction-local control-stream state, not complete resume orchestration.
 - Unknown members at every depth and syntactically valid unknown capability
   tokens are preserved. Direction-specific unknown message types are rejected.
   Errors follow §9.1's framing → version → type → fields order.
@@ -80,6 +82,91 @@ caller error (`ValueError`). Audio errors use `MALFORMED` (§8.1).
   it while the frame is in use. Use `bytes(frame.payload)` for an owned snapshot.
   `encode_audio` returns owned bytes. Optional `direction` on decoding checks kind
   1 from clients / kind 2 from servers; omitted checks structure only.
+
+## Reliable control-stream state
+
+`Outbox` owns one sender's stream; `Inbox` owns one sender's receive cursor.
+Direction always identifies the **sender**. Keep the same objects over reconnects
+of one session. Do not reuse them for another session or share them across threads
+without application synchronization. They are synchronous, with no network/timer
+or device behavior and no durable persistence/restore API.
+
+```python
+from vrealtime import Inbox, Outbox
+
+outgoing = Outbox('client', limit=1024)  # local message-count policy
+first = outgoing.stamp({'type': 'text', 'text': 'hello'})
+assert first == {'v': 1, 'seq': 1, 'type': 'text', 'text': 'hello'}
+assert outgoing.stamp({'type': 'ping'})['seq'] == 0
+assert outgoing.resend_from(0) == [first]
+outgoing.ack(1)
+assert outgoing.resend_from(0) is None  # old data was actually discarded
+assert outgoing.resend_from(1) == []  # no messages need replay
+
+incoming = Inbox('server')
+message = {'v': 1, 'seq': 1, 'type': 'text', 'responseId': 'r', 'delta': 'hello'}
+assert incoming.accept(message)
+assert not incoming.accept(message)
+assert incoming.last_seq == 1
+```
+
+- `Outbox(direction, limit=DEFAULT_REPLAY_LIMIT)` starts at zero with a positive
+  Python-int message capacity (default 1024). `last_seq` and `pending` are read-only
+  properties. `stamp(message)` takes an unenveloped dict (no `v` or `seq`), validates
+  it using the existing direction-specific codec and returns an owned dict. The
+  exported immutable `TRANSIENT_MESSAGE_TYPES` keeps codec/classification in step.
+- For **server error messages**, `stamp(error, sessionless=True)` emits seq 0;
+  `sessionless=False` assigns the next session seq. The boolean is mandatory for
+  errors and rejected for other message types; the helper cannot infer session
+  binding from a message name or earlier `ready`. Whether a connection is allowed
+  to send now remains the future session layer's responsibility.
+- Transient messages never consume seq or cache space (§4.1). Sequenced messages
+  are cached until cumulative ACK or oldest-first capacity eviction. `last_seq`
+  never decreases or wraps; further numbered stamps after uint32 exhaustion raise
+  `OverflowError`. Transients/sessionless errors can still be emitted. No new wire
+  error code is introduced and the helper cannot open/close a session itself.
+- `ack(up_to)` accepts uint32 Python ints (excluding bool). Repeated/stale ACKs are
+  harmless. §4.2 says a peer MUST NOT ACK beyond what it received, but also defines
+  an ACK at/beyond the sender's last seq as acknowledging everything sent. This
+  helper tolerates such **uint32** ahead ACKs, clears only existing entries, and
+  never grants credit for future sends. It does not silently accept malformed or
+  out-of-range Python arguments. A future session may separately report invalid
+  peer behavior; this API does not invent a wire response.
+- `resend_from(last_seen)` accepts a uint32 Python int and returns ordered owned
+  message copies, `[]` when already current, or `None` when ahead of `last_seq` or
+  below the highest removed seq. **ACK deletion counts as loss of stored data,
+  just like eviction** (§5.4 requires every requested message). The TypeScript
+  helper currently tracks only unacknowledged evictions and can return an
+  incomplete list for a cursor behind acknowledged/deleted data; Python does not
+  inherit this behavior. No TypeScript or normative file changes in this PR.
+- Input, stamped result and replay results are isolated by deep copies. Validation
+  and snapshot copies complete before a stamp consumes seq or evicts prior data.
+  This costs time/memory proportional to message size; ACK/oldest eviction use an
+  ordered queue rather than repeatedly shifting a list. Capacity bounds message
+  **count**, not bytes. The codec's local JSON limits still apply; a future transport
+  needs a frame-byte limit. No audio hot path or measured latency claim is involved.
+- `Inbox(direction).accept(message)` validates the full message first. Invalid
+  structure raises the existing `ProtocolError` without changing the cursor.
+  Seq 0 is always accepted without cursor changes; seq <= cursor is a duplicate;
+  higher seq advances it (§4.3). A gap is accepted and advances the cursor by those
+  rules; the sender violated contiguity, but no recovery is defined. This does not
+  mean missing messages were delivered. Duplicate invalid messages still fail
+  structural validation rather than bypassing it.
+- Integral JSON numbers accepted by the codec normalize to Python int inside
+  `Inbox`. Local `ack`/`resend_from` parameters are stricter Python ints: a future
+  reader should normalize validated wire cursors, never blindly coerce bool or
+  fractional/unvalidated values. Acceptance/ACK means receipt into state, not tool
+  completion or exactly-once side effects; application dispatch and sequencing of
+  replay before new sends are outside this module.
+
+Malformed local arguments raise `ValueError`; structural failures use the existing
+`ProtocolError` (a ValueError subtype); valid but unsatisfiable replay returns None.
+The caller must translate that outcome into the appropriate session failure and
+must not silently open a new session and replay old effects.
+
+Boundary tests use private test-only state injection to reach uint32 exhaustion,
+with a consistent already-discarded prefix. There is no public arbitrary cursor
+setter added for testing. No full reconnect or #17 network conformance claim is made.
 
 ## Existing contract discrepancies
 
@@ -147,4 +234,7 @@ python -m venv /tmp/vrt-sdist-check
 CI runs Python 3.10 and 3.14 when Python, shared spec or this workflow changes,
 including wheel and sdist install smoke checks. Packaging does not publish anything.
 The production Python line count is printed and checked against #18's 800-line
-core budget; this foundation uses only part of it, with the rest of the SDK pending.
+core budget. The current core totals 619 lines (149 added in this reliability step),
+leaving 181 lines for the remaining non-audio SDK. Whether connection/session, tools
+and cancellation can fit that remainder has not been established; review the full
+budget with maintainers before claiming the complete SDK can meet it.

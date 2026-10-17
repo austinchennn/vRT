@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vrealtime"
 version = "0.1.0"
-description = "Stateless Python codecs for the vRT wire protocol"
+description = "Python protocol codecs and in-memory control-stream state for vRT"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
