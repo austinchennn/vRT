@@ -1,0 +1,22 @@
+[
+  {
+    "profile": "server-resume-replay-v1",
+    "id": "server/resume/suffix",
+    "expected": "Same session/model resumes with client cursor and full ordered unacknowledged offline suffix"
+  },
+  {
+    "profile": "server-resume-replay-v1",
+    "id": "server/resume/from-zero",
+    "expected": "Unprocessed captured history plus offline messages replays from zero with original seq/content"
+  },
+  {
+    "profile": "server-resume-replay-v1",
+    "id": "server/resume/caught-up",
+    "expected": "Current cursor yields empty replay, then a new sequenced marker proves continuity"
+  },
+  {
+    "profile": "server-resume-replay-v1",
+    "id": "server/resume/replace",
+    "expected": "New connection replaces live old connection with close 4000; subsequent traffic only reaches new peer"
+  }
+]

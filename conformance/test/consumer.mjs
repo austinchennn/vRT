@@ -58,6 +58,13 @@ try {
   assert.ok(control.cases.every(item => item.status === 'pass'), JSON.stringify(control));
   assert.equal(control.fullSuite, 'incomplete');
   assert.deepEqual(control.capabilities, []);
+  const resumeArgs = ['server', '--profile', 'server-resume-replay-v1', '--exec', process.execPath, '--json', '--', join(pkg, 'dist/node/drivers/typescript-server.js')];
+  const resume = JSON.parse(execFileSync(cli, resumeArgs, { cwd: temp, encoding: 'utf8', timeout: 15000 }));
+  assert.equal(resume.profile, 'server-resume-replay-v1');
+  assert.equal(resume.cases.length, 4);
+  assert.ok(resume.cases.every(item => item.status === 'pass'), JSON.stringify(resume));
+  assert.equal(resume.fullSuite, 'incomplete');
+  assert.deepEqual(resume.capabilities, []);
   const principalArgs = ['server', '--profile', 'server-resume-principal-v1', '--exec', process.execPath, '--json', '--', join(pkg, 'dist/node/drivers/typescript-server.js')];
   const principal = JSON.parse(execFileSync(cli, principalArgs, { cwd: temp, encoding: 'utf8', timeout: 15000 }));
   assert.equal(principal.profile, 'server-resume-principal-v1');
@@ -102,6 +109,11 @@ try {
   assert.throws(() => execFileSync(cli, controlArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
     const report = JSON.parse(error.stdout);
     return error.status === 1 && report.cases.some(item => item.id === 'client/control/state-call' && item.status === 'incomplete' && item.stage === 'inventory');
+  });
+  writeFileSync(inventory, JSON.stringify(definitions.filter(item => item.id !== 'server/resume/suffix')));
+  assert.throws(() => execFileSync(cli, resumeArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
+    const report = JSON.parse(error.stdout);
+    return error.status === 1 && report.cases.some(item => item.id === 'server/resume/suffix' && item.status === 'incomplete' && item.stage === 'inventory');
   });
   writeFileSync(inventory, JSON.stringify(definitions.filter(item => item.id !== 'server/resume-principal/reauth')));
   assert.throws(() => execFileSync(cli, principalArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
