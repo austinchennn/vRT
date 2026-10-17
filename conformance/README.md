@@ -1,6 +1,6 @@
 # vRT black-box conformance profiles
 
-These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1`, `server-auth-v1` and `server-tool-stream-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
+These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1`, `server-auth-v1`, `server-tool-stream-v1` and `server-input-validation-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
 
 ## Run from a checkout
 
@@ -118,3 +118,32 @@ The root workspace includes this package, but production `scripts/packages.mjs` 
 - Drivers are trusted test instrumentation. The runner bounds its own incoming WebSocket payload (64 KiB), frame trace (256), JSONL buffer (64 KiB), stderr tail (8 KiB), waits and direct-child termination. It is not an OS sandbox; an external driver must own/clean up any descendants it spawns. Shipped drivers spawn no descendants.
 - Public SDK events plus driver effects provide evidence under the documented fence, not introspection into private SDK state. An implementation that cannot expose equivalent driver operations needs an explicit incomplete profile, not invented success.
 - The small phase-1 scenario inventory selects fixed implementations rather than exposing a general-purpose workflow language. Adding scenarios requires explicit runner support and independent oracle review.
+
+
+## Server input validation and binary input profile
+
+```sh
+node conformance/dist/node/cli.js server --profile server-input-validation-v1 --exec node --json -- conformance/dist/node/drivers/typescript-server.js
+```
+
+An explicit server/driver profile for §§4.1–4.3, 5.1, 8.1–8.2 and 9.1. It uses no wire capability, model credentials or audio hardware. Missing driver instrumentation is incomplete/nonzero; malformed or missing observations fail rather than silently counting as no effects. The existing default/other profiles and their instrumentation remain unchanged.
+
+| Stable case ID | Assertions |
+|---|---|
+| `server/input/control-pre` | Shared invalid envelope vectors plus invalid text/ping fields; priority, recoverable/sessionless errors, no model session/effects, then successful hello. |
+| `server/input/control-post` | Same classifications after ready; sequenced errors, no model side effects or receive-cursor advance; valid seq 1 text still executes once. |
+| `server/input/types` | Exact `toString`/`__proto__` matching, missing/non-string/unknown types and wrong sender direction: UNKNOWN_TYPE precedes field validation. |
+| `server/input/binary-pre` | All short lengths 0–4, undefined kinds 0/3/255 and server-received kind 2: recoverable seq-0 MALFORMED, no model audio/session, same connection later works. |
+| `server/input/binary-post` | Same malformed frames after ready, errors sequenced and no model audio. |
+| `server/input/audio-before-ready` | Valid pre-hello audio ignored, not queued into the eventual session; a distinct ready-after marker arrives once. |
+| `server/input/audio-ready` | Nonempty PCM bytes/negotiated format preserved, empty payload ignored or forwarded empty once; audio does not advance the control ACK/sequence cursor; valid control seq 1 still works. |
+
+The runner loads the unmodified client envelope and binary vectors from installed assets and constructs additional raw frames itself. The output-max-seq vector is structurally valid but explicitly invalid for a server receiver. Big-endian header values (including uint32 max) are independently checked against the golden bytes without SDK audio codecs. The server model API does not expose audio seq: this proves the harness layout and payload delivery, **not** black-box correctness of the receiver's informational seq decoding or a full 2^32-frame wrap. No packet-order/duplicate rejection rule is invented. Whole PCM samples remain a SHOULD; no new content validation is required.
+
+Before inspecting absence of effects, each test obtains ordered ping/pong receipt fences, then a public model snapshot. Pre-hello checks require zero model sessions and inputs. After a valid seq-1 text counterexample, `finishInputs` drains the controlled fixture's attached continuations and emits one public model transcript marker while keeping the connection open. The resulting real sequenced wire event exposes hidden sequence gaps, including a counter incorrectly advanced by audio. Another pong and a normal WebSocket close provide final wire fences; the oracle checks the complete trace, error inventory and independently observed model inputs. Same-seq identical replay remains one logical message; conflicting replay still fails. The text counterexample contains an extra property allowed by schema.
+
+Instrumentation is trusted: it observes the model's public command hook, uses an inert model with no scripts, tools or background producers, and reports bounded snapshots. This is a finite completion contract, not a guarantee against arbitrary delayed application work, dishonest drivers, process trees or physical effects. Trace/stdio and observation limits remain bounded. Early close, no response, process exit and missing data fail boundedly. Official close and EOF are idempotent; directly owned processes/sockets/timers are cleaned up.
+
+Full suite remains incomplete. Output audio/playback, devices, resampling, opening-state audio races, full binary/error matrices, reconnect/replay and a Python network driver are outside this profile. Other conformance profiles must be selected separately.
+
+An unsolicited control ACK with upTo 0 does not identify an audio frame and cannot by itself prove audio was acknowledged. The oracle permits it, rejects ACKs beyond the handled control cursor, and checks the final marker for hidden sequence consumption. A separate zero-ACK positive fixture prevents treating all ACK frames as violations.

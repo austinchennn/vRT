@@ -38,6 +38,13 @@ try {
   assert.ok(stream.cases.every(c => c.status === 'pass'));
   assert.deepEqual(stream.capabilities, ['tool-stream-v1']);
   assert.equal(stream.fullSuite, 'incomplete');
+  const inputArgs = ['server', '--profile', 'server-input-validation-v1', '--exec', process.execPath, '--json', '--', join(pkg, 'dist/node/drivers/typescript-server.js')];
+  const input = JSON.parse(execFileSync(cli, inputArgs, { cwd: temp, encoding: 'utf8', timeout: 15000 }));
+  assert.equal(input.profile, 'server-input-validation-v1');
+  assert.equal(input.cases.length, 7);
+  assert.ok(input.cases.every(item => item.status === 'pass'), JSON.stringify(input));
+  assert.equal(input.fullSuite, 'incomplete');
+  assert.deepEqual(input.capabilities, []);
   // A partial/corrupt scenario inventory must not silently become a smaller passing profile.
   const inventory = join(pkg, 'dist/assets/scenarios.json');
   const definitions = JSON.parse(readFileSync(inventory, 'utf8'));
@@ -60,6 +67,11 @@ try {
   assert.throws(() => execFileSync(cli, streamArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
     const report = JSON.parse(error.stdout);
     return error.status === 1 && report.cases.some(c => c.id === 'server/tool-stream/lifecycle' && c.status === 'incomplete');
+  });
+  writeFileSync(inventory, JSON.stringify(definitions.filter(item => item.id !== 'server/input/binary-post')));
+  assert.throws(() => execFileSync(cli, inputArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
+    const report = JSON.parse(error.stdout);
+    return error.status === 1 && report.cases.some(item => item.id === 'server/input/binary-post' && item.status === 'incomplete' && item.stage === 'inventory');
   });
   console.log('Packed CLI passes client/server profile outside repository, no SDK installation required');
 } finally { rmSync(temp, { recursive: true, force: true }); }
