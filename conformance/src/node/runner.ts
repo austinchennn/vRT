@@ -1,5 +1,6 @@
 import type { CaseResult, Profile, Report, Wire } from '../report.js';
 import { cancellation, CANCELLATION_CASES, IncompleteDriver } from './cancellation.js';
+import { authCredentials, authenticateScenario, AUTH_CASES, AUTH_PROFILE, IncompleteAuthDriver } from './auth.js';
 import { assets } from './assets.js';
 import { until } from './deadline.js';
 import { ProcessDriver } from './process-driver.js';
@@ -16,6 +17,7 @@ export async function run(options: Options): Promise<Report> {
   const { oracle, scenarios, hello: baselineHello, wrongVersion } = assets(options.assets);
   const profile = options.profile ?? 'handshake-interrupt-v1';
   if (profile === 'tool-cancellation-v1' && options.mode !== 'client') throw new Error('tool-cancellation-v1 only supports client mode');
+  if (profile === AUTH_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-auth-v1 requires server mode and --exec');
   const report: Report = {
     protocol: 1, profile, fullSuite: 'incomplete', mode: options.mode,
     capabilities: [], cases: [], remaining: ['resume/replay', 'heartbeat', 'audio', 'queued/running cancellation', 'optional capabilities', 'server interruption routing'],
@@ -23,7 +25,8 @@ export async function run(options: Options): Promise<Report> {
   const selected = scenarios.filter(s => (s.profile ?? 'handshake-interrupt-v1') === profile && s.id.startsWith(options.mode + '/'));
   if (profile === 'tool-cancellation-v1') report.remaining = ['handshake/old-epoch baseline (separate profile)', ...report.remaining.filter(item => item !== 'queued/running cancellation')];
   else report.remaining = report.remaining.map(item => item === 'queued/running cancellation' ? item + ' (separate profile)' : item);
-  const required = profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
+  if (profile === AUTH_PROFILE) report.remaining.unshift('handshake/interrupt baseline (separate profile)', 'resume principal isolation');
+  const required = profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
     ? ['client/handshake/baseline', 'client/interrupt/stale-call']
     : ['server/handshake/baseline', 'server/handshake/version'];
   for (const id of required) {
@@ -32,9 +35,10 @@ export async function run(options: Options): Promise<Report> {
     if (definitions.length === 0) report.cases.push({ id, status: 'incomplete', durationMs: 0, expected: 'Required profile scenario present', actual: 'Missing scenario definition', stage: 'inventory' });
   }
   for (const scenario of selected) {
-    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...CANCELLATION_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
+    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
     const start = performance.now(); const end = start + options.timeoutMs;
     let stage = 'setup';
+    const credentials = profile === AUTH_PROFILE ? authCredentials() : undefined;
     const result: CaseResult = { ...scenario, status: 'fail', durationMs: 0, actual: null, stage };
     let peer: Peer | undefined;
     let host: Awaited<ReturnType<typeof listen>> | undefined;
@@ -80,37 +84,47 @@ export async function run(options: Options): Promise<Report> {
         let url = options.url;
         if (options.command) {
           driver = new ProcessDriver(options.command, options.args);
-          stage = 'server ready'; const info = await driver.request('ready', {}, end);
+          stage = 'server ready'; const info = await driver.request('ready', credentials ? { profile: AUTH_PROFILE, authToken: credentials.token } : {}, end);
+          if (credentials && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.includes(AUTH_PROFILE))) throw new IncompleteAuthDriver('Driver does not advertise server-auth-v1 instrumentation');
           url = info.url;
         }
         if (typeof url !== 'string' || !/^wss?:\/\//.test(url)) throw new Error('Server mode needs --url or driver ready.url');
+        if (credentials && (url.includes(credentials.token) || url.includes(credentials.wrongToken))) throw new Error('Driver URL must not contain a test credential');
         peer = await dial(url, end);
-        stage = 'server handshake';
-        const invalid = scenario.id === 'server/handshake/version';
-        peer.send({ ...baselineHello, ...(invalid ? { v: wrongVersion } : {}) });
-        if (invalid) {
-          const error = await peer.expect(m => m.type === 'error', end, stage);
-          oracle.message('server', error);
-          if (peer.messages.some(m => m.type === 'ready')) throw new Error('Server opened a session for invalid major');
-          if (error.code !== 'UNSUPPORTED_VERSION' || error.recoverable !== true || error.seq !== 0) throw new Error('Expected recoverable sessionless UNSUPPORTED_VERSION');
-          // §9.1 keeps the connection open. A valid hello must still work.
-          peer.send(baselineHello);
+        if (credentials) {
+          result.actual = await authenticateScenario(scenario.id, peer, oracle, baselineHello, credentials, end, value => { stage = value; });
+        } else {
+          stage = 'server handshake';
+          const invalid = scenario.id === 'server/handshake/version';
+          peer.send({ ...baselineHello, ...(invalid ? { v: wrongVersion } : {}) });
+          if (invalid) {
+            const error = await peer.expect(m => m.type === 'error', end, stage);
+            oracle.message('server', error);
+            if (peer.messages.some(m => m.type === 'ready')) throw new Error('Server opened a session for invalid major');
+            if (error.code !== 'UNSUPPORTED_VERSION' || error.recoverable !== true || error.seq !== 0) throw new Error('Expected recoverable sessionless UNSUPPORTED_VERSION');
+            // §9.1 keeps the connection open. A valid hello must still work.
+            peer.send(baselineHello);
+          }
+          const ready = await peer.expect(m => m.type === 'ready', end, stage);
+          oracle.message('server', ready);
+          if ((ready.capabilities ?? []).length !== 0) throw new Error('Server enabled unoffered capability');
+          peer.socket.close(1000, 'scenario complete'); await peer.closed(end);
+          oracle.baseline('server', peer.messages);
+          result.actual = { ready: true, versionRejected: invalid, capabilities: [] };
         }
-        const ready = await peer.expect(m => m.type === 'ready', end, stage);
-        oracle.message('server', ready);
-        if ((ready.capabilities ?? []).length !== 0) throw new Error('Server enabled unoffered capability');
-        peer.socket.close(1000, 'scenario complete'); await peer.closed(end);
-        oracle.baseline('server', peer.messages);
-        result.actual = { ready: true, versionRejected: invalid, capabilities: [] };
       }
       result.status = 'pass';
-    } catch (error) { if (error instanceof IncompleteDriver) result.status = 'incomplete'; result.actual = { error: error instanceof Error ? error.message : String(error), trace: peer?.messages ?? [] }; }
+    } catch (error) {
+      if (error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
+      result.actual = { error: error instanceof Error ? error.message : String(error), trace: peer?.messages ?? [], close: peer?.closeInfo };
+    }
     finally {
       // Stop untrusted processes even when their protocol is broken, then close sockets.
       const cleanup = await Promise.allSettled([driver?.stop(), peer?.dispose()]);
       try { await host?.close(); } catch (error) { cleanup.push({ status: 'rejected', reason: error }); }
       const failed = cleanup.find(c => c.status === 'rejected');
       if (failed?.status === 'rejected') { result.status = 'fail'; result.actual = { previous: result.actual, cleanup: String(failed.reason) }; }
+      if (credentials) result.actual = credentials.redact(result.actual);
       result.stage = stage; result.durationMs = performance.now() - start; report.cases.push(result);
     }
   }

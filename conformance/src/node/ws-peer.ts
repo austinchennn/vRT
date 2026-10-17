@@ -5,6 +5,7 @@ import { deferred, until } from './deadline.js';
 /** Records the entire bounded trace through close, not just the first matching frame. */
 export class Peer {
   readonly messages: Wire[] = [];
+  closeInfo: { code: number; reason: string; messageCount: number } | undefined;
   readonly #changed = new Set<() => void>();
   readonly #closed = deferred<void>();
   #failure: Error | undefined;
@@ -20,15 +21,19 @@ export class Peer {
       this.#notify();
     });
     socket.on('error', error => { this.#failure = error; this.#notify(); });
-    socket.on('close', () => { this.#closed.resolve(); this.#notify(); });
+    socket.on('close', (code, reason) => {
+      this.closeInfo = { code, reason: reason.toString(), messageCount: this.messages.length };
+      this.#closed.resolve(); this.#notify();
+    });
   }
   #notify(): void { for (const changed of [...this.#changed]) changed(); }
   send(message: Wire): void { this.socket.send(JSON.stringify(message)); }
-  async expect(predicate: (m: Wire) => boolean, end: number, stage: string): Promise<Wire> {
+  sendRaw(text: string): void { this.socket.send(text); }
+  async expect(predicate: (m: Wire) => boolean, end: number, stage: string, after = 0): Promise<Wire> {
     const found = deferred<Wire>();
     const check = () => {
       if (this.#failure) return found.reject(this.#failure);
-      const message = this.messages.find(predicate);
+      const message = this.messages.slice(after).find(predicate);
       if (message) found.resolve(message);
       else if (this.socket.readyState === WebSocket.CLOSED) found.reject(new Error(`Peer closed: ${stage}`));
     };

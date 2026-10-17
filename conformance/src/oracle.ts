@@ -40,6 +40,35 @@ export class Oracle {
       }
     }
   }
+  error(value: Wire, code: string, recoverable: boolean): void {
+    this.message('server', value);
+    if (value.type !== 'error' || value.code !== code || value.recoverable !== recoverable) {
+      throw new Error(`Expected ${code} recoverable=${recoverable}`);
+    }
+  }
+  /** New-session profile only: §4.1 binds at ready; §5.3 rejects without binding. */
+  sessionErrors(messages: Wire[]): void {
+    let bound = false;
+    for (const message of messages) {
+      this.message('server', message);
+      if (message.type === 'ready') {
+        if (bound) throw new Error('Duplicate ready');
+        bound = true;
+      } else if (message.type === 'error') {
+        if (!bound && message.seq !== 0) throw new Error('Sessionless error must use seq 0');
+        if (bound && message.seq === 0) throw new Error('Bound error must be sequenced');
+      }
+    }
+    this.baseline('server', messages);
+  }
+  refused(messages: Wire[], close: { code: number; messageCount: number } | undefined): void {
+    this.sessionErrors(messages);
+    if (messages.some(m => m.type === 'ready')) throw new Error('Rejected authentication must not receive ready');
+    const index = messages.findIndex(m => m.type === 'error' && m.code === 'UNAUTHORIZED');
+    if (index < 0) throw new Error('Missing UNAUTHORIZED before close');
+    this.error(messages[index]!, 'UNAUTHORIZED', false);
+    if (!close || close.code !== 4401 || close.messageCount <= index) throw new Error('UNAUTHORIZED must precede close 4401');
+  }
   interrupted(messages: Wire[], effects: Wire, callId: string, epoch: number): void {
     this.#interruptedResult(messages, callId, epoch);
     if (effects.started !== 0 || effects.committed !== 0) {
