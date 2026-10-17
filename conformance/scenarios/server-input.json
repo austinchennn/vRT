@@ -1,0 +1,37 @@
+[
+  {
+    "profile": "server-input-validation-v1",
+    "id": "server/input/control-pre",
+    "expected": "Sessionless recoverable errors follow §9.1 priority; same connection can handshake"
+  },
+  {
+    "profile": "server-input-validation-v1",
+    "id": "server/input/control-post",
+    "expected": "Bound recoverable errors do not execute input or advance receive cursor"
+  },
+  {
+    "profile": "server-input-validation-v1",
+    "id": "server/input/types",
+    "expected": "Prototype names and server-only types are UNKNOWN_TYPE"
+  },
+  {
+    "profile": "server-input-validation-v1",
+    "id": "server/input/binary-pre",
+    "expected": "Malformed audio is dropped with sessionless recoverable MALFORMED"
+  },
+  {
+    "profile": "server-input-validation-v1",
+    "id": "server/input/binary-post",
+    "expected": "Malformed audio is dropped with bound sequenced recoverable MALFORMED"
+  },
+  {
+    "profile": "server-input-validation-v1",
+    "id": "server/input/audio-before-ready",
+    "expected": "Pre-ready audio is ignored, never buffered into a new session"
+  },
+  {
+    "profile": "server-input-validation-v1",
+    "id": "server/input/audio-ready",
+    "expected": "Valid/empty audio is accepted, payload and negotiated format preserved, numbering independent"
+  }
+]
