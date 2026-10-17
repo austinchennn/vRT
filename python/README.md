@@ -136,9 +136,9 @@ assert incoming.last_seq == 1
   message copies, `[]` when already current, or `None` when ahead of `last_seq` or
   below the highest removed seq. **ACK deletion counts as loss of stored data,
   just like eviction** (§5.4 requires every requested message). The TypeScript
-  helper currently tracks only unacknowledged evictions and can return an
-  incomplete list for a cursor behind acknowledged/deleted data; Python does not
-  inherit this behavior. No TypeScript or normative file changes in this PR.
+  Outbox follows the same replay-availability rule: a cursor behind removed
+  history fails instead of returning an incomplete replay. ACK permits deletion;
+  it does not make a later request for that deleted history satisfiable.
 - Input, stamped result and replay results are isolated by deep copies. Validation
   and snapshot copies complete before a stamp consumes seq or evicts prior data.
   This costs time/memory proportional to message size; ACK/oldest eviction use an
