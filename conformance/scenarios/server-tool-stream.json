@@ -1,0 +1,27 @@
+[
+  {
+    "profile": "server-tool-stream-v1",
+    "id": "server/tool-stream/baseline",
+    "expected": "No unoffered capabilities or tool.stream; server tool still completes"
+  },
+  {
+    "profile": "server-tool-stream-v1",
+    "id": "server/tool-stream/lifecycle",
+    "expected": "Interleaved calls have start/deltas/complete/progress/one settled and no server output"
+  },
+  {
+    "profile": "server-tool-stream-v1",
+    "id": "server/tool-stream/no-delta",
+    "expected": "Direct complete call has start/complete/progress/one settled without argument deltas"
+  },
+  {
+    "profile": "server-tool-stream-v1",
+    "id": "server/tool-stream/failed",
+    "expected": "Incomplete arguments end as failed without tool execution"
+  },
+  {
+    "profile": "server-tool-stream-v1",
+    "id": "server/tool-stream/cancelled",
+    "expected": "Interrupted collecting call ends cancelled and late model events do not reopen it"
+  }
+]

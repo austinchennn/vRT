@@ -1,4 +1,5 @@
 import { Ajv2020 } from 'ajv/dist/2020.js';
+import { streamLifecycle, STREAM_CAPABILITY } from './tool-stream-oracle.js';
 import type { Wire } from './report.js';
 
 function canonical(value: unknown): string {
@@ -26,19 +27,31 @@ export class Oracle {
     if (!validate(value)) throw new Error(`${direction} schema: ${this.#ajv.errorsText(validate.errors)}`);
   }
   baseline(direction: 'client' | 'server', messages: Wire[]): void {
+    this.traffic(direction, messages, []);
+  }
+  traffic(direction: 'client' | 'server', messages: Wire[], capabilities: readonly string[]): void {
     let last = 0;
-    const seen = new Set<number>();
-    const gated = new Set(this.registry.capabilities.flatMap((c: Wire) => c.messages?.[direction] ?? []));
+    const seen = new Map<number, Wire>();
+    const gated = new Set(this.registry.capabilities.filter((c: Wire) => !capabilities.includes(c.token)).flatMap((c: Wire) => c.messages?.[direction] ?? []));
     for (const message of messages) {
       this.message(direction, message);
       if (gated.has(message.type)) throw new Error(`Unnegotiated message ${message.type}`);
       if (message.seq > 0) {
         // Same-seq replay is one logical message; this first-phase profile has no resume.
-        if (seen.has(message.seq)) continue;
+        const previous = seen.get(message.seq);
+        if (previous) {
+          if (canonical(previous) !== canonical(message)) throw new Error('Conflicting replay');
+          continue;
+        }
         if (message.seq !== last + 1) throw new Error(`Noncontiguous sequence ${message.seq}, expected ${last + 1}`);
-        last = message.seq; seen.add(message.seq);
+        last = message.seq; seen.set(message.seq, message);
       }
     }
+  }
+  streams(messages: Wire[], capabilities: string[], ids: string[], final: boolean): Map<string, Wire[]> {
+    this.traffic('server', messages, capabilities);
+    if (capabilities.includes(STREAM_CAPABILITY) && messages.some(m => m.type === 'tool.call.delta')) throw new Error('Legacy preview while tool-stream-v1 is negotiated');
+    return streamLifecycle(messages, ids, final);
   }
   error(value: Wire, code: string, recoverable: boolean): void {
     this.message('server', value);

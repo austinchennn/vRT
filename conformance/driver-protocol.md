@@ -80,6 +80,26 @@ Before acknowledging, the driver starts a server on an OS-assigned loopback port
 
 The control token stays out of argv, URLs and normal reports; stdout contains only JSONL replies. Logs on stderr must omit tokens too. The runner redacts the literal generated good and wrong token values if an erroneous driver/peer echoes them in a failure trace, close reason or captured error. Drivers are trusted and this does not sanitize arbitrarily encoded secrets or change their own logging obligations. There is no production identity provider or language-specific contract requirement.
 
+## Opt-in `server-tool-stream-v1` instrumentation
+
+This is a separate server-only test profile, not a wire capability. All old ready/finish forms and profiles keep their existing meaning. Each case owns one process/server/model and uses the following additive operations:
+
+| Command | Data | Successful confirmation |
+|---|---|---|
+| `ready` | `{profile: "server-tool-stream-v1", argumentStreaming: boolean}` | Start an anonymous loopback server on a dynamic port with deterministic model and server tool `probe`; configure the public model capability accordingly. Return `{url, driverCapabilities: ["server-tool-stream-v1"]}` only once listening. |
+| `beginStream` | `{kind: "baseline" or "lifecycle" or "no-delta" or "failed" or "cancelled", callIds: string[]}` | Initialize effects/fences once, start one model response, inject two argument fragments for each call (interleaved across the two lifecycle calls); no full calls yet. no-delta emits only response start. Return after events are injected, without closing. |
+| `readStreamEffects` | `{}` | Return `{calls: {[callId]: {started: number, committed: number}}}`; entry counts before application checks. |
+| `completeStream` | `{}` | Once, issue full model calls with `{value: 1}` and end the response normally; valid only for baseline/lifecycle/no-delta. Do not wait for held tool completion. |
+| `waitStreamTool` | `{}` | After complete, acknowledge the first public tool entry. The tool has emitted progress (except no-delta) and remains blocked before commit. |
+| `finishStream` | `{}` | Once: release and await owned tools/result submission for executing cases; end the partial response for failed; for cancelled, after wire interruption confirmation, inject old delta/full-call events. Drain all owned work and attached continuations, return final effects, **keep connection open**. |
+| `close` | `{}` | Abort/close the server and release/drain any held application work; repeat/EOF safe. |
+
+The runner chooses one call ID except lifecycle, which uses two. It sends hello with no capability for baseline and offers only tool-stream-v1 otherwise. The driver configures model support but must not force negotiated wire capabilities. Unsupported instrumentation or declined required capability is incomplete/nonzero, not a claim that the optional feature is mandatory for all servers.
+
+Control replies do not substitute for wire evidence. After begin and finish, the runner sends a ping and waits for its new pong, fencing wire frames previously enqueued by the confirmed model/application work. Finish must not leave future writes scheduled. It must not close to avoid producing a missing terminal: the oracle checks required terminals while the connection is live and then checks the complete trace through close. An early-ending session is incomplete when its valid prefix cannot finish this scenario, respecting §7.5's exception. Faulty peers with visible wire violations still fail.
+
+Official instrumentation uses only public model events/clock, tool context, server configuration and lifecycle APIs. The cancelled case advances the public fake clock to deliver its scheduled response.end before late model events. No private queue/gate/state is read. Request IDs, stdout/stderr rules, monotonic deadlines and bounded direct-child shutdown remain unchanged. Drivers are trusted fixtures; this is not an arbitrary-work drain guarantee, process-tree supervision or rollback of effects.
+
 ## Ownership and completeness
 
 The driver owns its SDK, listeners, application tasks, timers and any child resources. It must report errors rather than fabricate success. The official drivers run directly as Node processes; foreign drivers can be Python, Java, C or another implementation with this contract. No Python network SDK is included in this phase.

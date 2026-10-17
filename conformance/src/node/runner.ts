@@ -1,6 +1,7 @@
 import type { CaseResult, Profile, Report, Wire } from '../report.js';
 import { cancellation, CANCELLATION_CASES, IncompleteDriver } from './cancellation.js';
 import { authCredentials, authenticateScenario, AUTH_CASES, AUTH_PROFILE, IncompleteAuthDriver } from './auth.js';
+import { serverToolStream, STREAM_CASES, STREAM_PROFILE, IncompleteStream } from './server-tool-stream.js';
 import { assets } from './assets.js';
 import { until } from './deadline.js';
 import { ProcessDriver } from './process-driver.js';
@@ -18,6 +19,7 @@ export async function run(options: Options): Promise<Report> {
   const profile = options.profile ?? 'handshake-interrupt-v1';
   if (profile === 'tool-cancellation-v1' && options.mode !== 'client') throw new Error('tool-cancellation-v1 only supports client mode');
   if (profile === AUTH_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-auth-v1 requires server mode and --exec');
+  if (profile === STREAM_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-tool-stream-v1 requires server mode and --exec');
   const report: Report = {
     protocol: 1, profile, fullSuite: 'incomplete', mode: options.mode,
     capabilities: [], cases: [], remaining: ['resume/replay', 'heartbeat', 'audio', 'queued/running cancellation', 'optional capabilities', 'server interruption routing'],
@@ -26,7 +28,8 @@ export async function run(options: Options): Promise<Report> {
   if (profile === 'tool-cancellation-v1') report.remaining = ['handshake/old-epoch baseline (separate profile)', ...report.remaining.filter(item => item !== 'queued/running cancellation')];
   else report.remaining = report.remaining.map(item => item === 'queued/running cancellation' ? item + ' (separate profile)' : item);
   if (profile === AUTH_PROFILE) report.remaining.unshift('handshake/interrupt baseline (separate profile)', 'resume principal isolation');
-  const required = profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
+  if (profile === STREAM_PROFILE) report.remaining.unshift('handshake/auth/cancellation (separate profiles)', 'client tool-stream observations', 'additional capability matrices');
+  const required = profile === STREAM_PROFILE ? STREAM_CASES : profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
     ? ['client/handshake/baseline', 'client/interrupt/stale-call']
     : ['server/handshake/baseline', 'server/handshake/version'];
   for (const id of required) {
@@ -35,7 +38,7 @@ export async function run(options: Options): Promise<Report> {
     if (definitions.length === 0) report.cases.push({ id, status: 'incomplete', durationMs: 0, expected: 'Required profile scenario present', actual: 'Missing scenario definition', stage: 'inventory' });
   }
   for (const scenario of selected) {
-    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
+    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES, ...STREAM_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
     const start = performance.now(); const end = start + options.timeoutMs;
     let stage = 'setup';
     const credentials = profile === AUTH_PROFILE ? authCredentials() : undefined;
@@ -84,14 +87,19 @@ export async function run(options: Options): Promise<Report> {
         let url = options.url;
         if (options.command) {
           driver = new ProcessDriver(options.command, options.args);
-          stage = 'server ready'; const info = await driver.request('ready', credentials ? { profile: AUTH_PROFILE, authToken: credentials.token } : {}, end);
+          stage = 'server ready'; const info = await driver.request('ready', credentials ? { profile: AUTH_PROFILE, authToken: credentials.token } : profile === STREAM_PROFILE ? { profile, argumentStreaming: !scenario.id.endsWith('no-delta') } : {}, end);
           if (credentials && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.includes(AUTH_PROFILE))) throw new IncompleteAuthDriver('Driver does not advertise server-auth-v1 instrumentation');
+          if (profile === STREAM_PROFILE && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.every((token: unknown) => typeof token === 'string') || !info.driverCapabilities.includes(STREAM_PROFILE))) throw new IncompleteStream('Driver lacks server-tool-stream-v1 instrumentation');
           url = info.url;
         }
         if (typeof url !== 'string' || !/^wss?:\/\//.test(url)) throw new Error('Server mode needs --url or driver ready.url');
         if (credentials && (url.includes(credentials.token) || url.includes(credentials.wrongToken))) throw new Error('Driver URL must not contain a test credential');
         peer = await dial(url, end);
-        if (credentials) {
+        if (profile === STREAM_PROFILE) {
+          const actual = await serverToolStream(scenario.id, peer, driver!, oracle, baselineHello, end, value => { stage = value; });
+          result.actual = actual;
+          report.capabilities = [...new Set([...report.capabilities, ...actual.capabilities])];
+        } else if (credentials) {
           result.actual = await authenticateScenario(scenario.id, peer, oracle, baselineHello, credentials, end, value => { stage = value; });
         } else {
           stage = 'server handshake';
@@ -115,7 +123,7 @@ export async function run(options: Options): Promise<Report> {
       }
       result.status = 'pass';
     } catch (error) {
-      if (error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
+      if (error instanceof IncompleteStream || error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
       result.actual = { error: error instanceof Error ? error.message : String(error), trace: peer?.messages ?? [], close: peer?.closeInfo };
     }
     finally {
