@@ -38,6 +38,12 @@ try {
   assert.ok(stream.cases.every(c => c.status === 'pass'));
   assert.deepEqual(stream.capabilities, ['tool-stream-v1']);
   assert.equal(stream.fullSuite, 'incomplete');
+  const heartbeatArgs = ['server', '--profile', 'server-heartbeat-v1', '--heartbeat-timeout-ms', '1001', '--exec', process.execPath, '--json', '--', join(pkg, 'dist/node/drivers/typescript-server.js')];
+  const heartbeat = JSON.parse(execFileSync(cli, heartbeatArgs, { cwd: temp, encoding: 'utf8', timeout: 15000 }));
+  assert.equal(heartbeat.profile, 'server-heartbeat-v1');
+  assert.equal(heartbeat.cases.length, 8);
+  assert.ok(heartbeat.cases.every(c => c.status === 'pass'), JSON.stringify(heartbeat));
+  assert.equal(heartbeat.fullSuite, 'incomplete');
   // A partial/corrupt scenario inventory must not silently become a smaller passing profile.
   const inventory = join(pkg, 'dist/assets/scenarios.json');
   const definitions = JSON.parse(readFileSync(inventory, 'utf8'));
@@ -60,6 +66,11 @@ try {
   assert.throws(() => execFileSync(cli, streamArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
     const report = JSON.parse(error.stdout);
     return error.status === 1 && report.cases.some(c => c.id === 'server/tool-stream/lifecycle' && c.status === 'incomplete');
+  });
+  writeFileSync(inventory, JSON.stringify(definitions.filter(s => s.id !== 'server/heartbeat/idle-resume')));
+  assert.throws(() => execFileSync(cli, heartbeatArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
+    const report = JSON.parse(error.stdout);
+    return error.status === 1 && report.cases.some(c => c.id === 'server/heartbeat/idle-resume' && c.status === 'incomplete');
   });
   console.log('Packed CLI passes client/server profile outside repository, no SDK installation required');
 } finally { rmSync(temp, { recursive: true, force: true }); }

@@ -1,0 +1,42 @@
+[
+  {
+    "profile": "server-heartbeat-v1",
+    "id": "server/heartbeat/pong-awaiting-hello",
+    "expected": "Pong seq 0 before hello without opening a session"
+  },
+  {
+    "profile": "server-heartbeat-v1",
+    "id": "server/heartbeat/pong-opening",
+    "expected": "Pong while public opening hook is held; ready after release"
+  },
+  {
+    "profile": "server-heartbeat-v1",
+    "id": "server/heartbeat/pong-ready",
+    "expected": "Pong seq 0 after ready without consuming sequenced numbers"
+  },
+  {
+    "profile": "server-heartbeat-v1",
+    "id": "server/heartbeat/idle-sessionless",
+    "expected": "No input causes close 4408 without creating a session"
+  },
+  {
+    "profile": "server-heartbeat-v1",
+    "id": "server/heartbeat/idle-resume",
+    "expected": "Close 4408 preserves an empty-stream session for minimal resume"
+  },
+  {
+    "profile": "server-heartbeat-v1",
+    "id": "server/heartbeat/activity-context",
+    "expected": "Public context receipt refreshes activity without probe ping"
+  },
+  {
+    "profile": "server-heartbeat-v1",
+    "id": "server/heartbeat/activity-malformed",
+    "expected": "Malformed input receipt refreshes activity and obeys error rules"
+  },
+  {
+    "profile": "server-heartbeat-v1",
+    "id": "server/heartbeat/activity-binary",
+    "expected": "Public model audio receipt refreshes activity without probe ping"
+  }
+]

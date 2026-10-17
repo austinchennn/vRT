@@ -1,6 +1,6 @@
 # vRT black-box conformance profiles
 
-These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1`, `server-auth-v1` and `server-tool-stream-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
+These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1`, `server-auth-v1`, `server-tool-stream-v1` and `server-heartbeat-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
 
 ## Run from a checkout
 
@@ -97,6 +97,37 @@ The independent oracle validates schema and registry gating, contiguous new sequ
 
 Known normative context: §3.3's final sentence still says the registry is empty, while §7.5 and the actual registry define draft tool-stream-v1. This profile follows those explicit definitions and reports the discrepancy without editing normative files. Schemas allow unknown members; server-result non-disclosure is checked semantically rather than inferred from additionalProperties. Other optional matrices, client UI/SHOULD behavior, reconnect/replay, binary/audio, heartbeat and VDoc context/transactions remain outside this profile. `fullSuite` remains incomplete.
 
+## Server heartbeat profile
+
+```sh
+node conformance/dist/node/cli.js server --profile server-heartbeat-v1 --heartbeat-timeout-ms 1200 --exec node --json -- conformance/dist/node/drivers/typescript-server.js
+```
+
+This opt-in server/driver-only profile tests §4.4 server MUST behavior. It does not impose client SHOULD behavior. A driver without the virtual-clock instrumentation reports incomplete/nonzero. Existing anonymous, auth, cancellation and stream profiles keep their original ready forms. Timing is test configuration, **not** a negotiated wire capability.
+
+| Stable case ID (`server/heartbeat/…`) | Evidence |
+|---|---|
+| `pong-awaiting-hello` | vRT ping before hello receives schema-valid seq-0 pong, no unsolicited ready, then legal hello succeeds. |
+| `pong-opening` | Public authenticate hook is held; pong arrives before release and ready only after release. |
+| `pong-ready` | Repeated seq-0 ping/pong after ready; subsequent MALFORMED uses the normal sequenced stream. |
+| `idle-sessionless` | No input: live before configured timeout, then observed WebSocket close 4408; no session created. |
+| `idle-resume` | Bound idle connection closes 4408; a new connection restores the same session within the resume window, with resumedFrom 0 because no client business messages were sent. Any observed server control cursor is supplied in resumeFrom. |
+| `activity-context` | Public onContext receipt refreshes activity; no probe ping is sent. |
+| `activity-malformed` | MALFORMED/recoverable error confirms receipt; invalid JSON also refreshes activity. |
+| `activity-binary` | A raw legal input-audio frame reaches public model sendAudio; binary input refreshes activity without hardware or probe ping. |
+
+`--heartbeat-timeout-ms` is local profile policy: an integer 100..60000, default 1200. The runner configures T, a resume window of 6T and a finite detection allowance of ceil(T/2). It checks live at T-1 after the last confirmed input and close by T+allowance. These are fixture/observation bounds, **not protocol timing constants** or a required polling algorithm. Activity is delivered at floor(3T/4); a live checkpoint at floor(5T/4) distinguishes refreshed input from the original deadline. Tests use multiple T values, including values not divisible by the SDK's polling fraction.
+
+There are two time axes: the runner's real monotonic per-case deadline and the server's explicit virtual time starting at zero. Only confirmed transport connection/receipt or wire response precedes clock advancement. Context uses onContext, binary uses the public fake model command, and malformed JSON uses its error. No extra traffic is used to test liveness after these activities. Outgoing server frames are not credited as incoming activity.
+
+The reference driver is a small real WebSocket edge calling public `Hub.attach`, with a public injected Clock and deterministic fake model. It owns transport attachment/close barriers, hook release and clock resources. It does not read private SDK sessions, lastSeen or timers. Close-request time is observed at the public edge adapter's close callback and checked alongside the actual remote WebSocket close code. Advancing the clock drains any close handshake it triggered before acknowledging; early-open checks combine public server socket state with the runner's socket state. Driver-owned timer handles are retained solely for resource disposal, never as a correctness oracle.
+
+This profile exercises the server Hub through a custom edge, not `serve()` HTTP/static-file/upgrade behavior or real wall-clock scheduler performance. Existing default/e2e checks still exercise the Node serve path. The resume probe has no application replay and is not evidence for bidirectional replay, lost results, cache loss or automatic reconnect.
+
+Wire faults buffer ping during opening, refresh activity only for ping, never close, close early/with the wrong code, count outgoing traffic as input, destroy timed-out sessions or number pong incorrectly. These must fail stable case IDs. Cleanup tests include control no-response, clock failure, process exit, held release, and an actual public SDK authenticate hook deliberately left blocked. Direct child PIDs vanish and repeat close/EOF is safe; no process-tree sandbox is promised.
+
+§4.4's “frame of any kind” does not explicitly distinguish WebSocket control frames from application data frames. This profile covers text/binary **data** frames and vRT JSON ping/pong, leaving RFC WebSocket Ping/Pong activity interpretation for maintainer clarification. §4.4 does not mandate a new error message/code before heartbeat close; none is invented. §9.3 warns proxies can replace close codes: these controlled direct-loopback cases test the server's own 4408 plus timing/traffic evidence, not a proxy-transformed endpoint. Full heartbeat/session conformance remains incomplete.
+
 ## Build, install and packaging
 
 ```sh
@@ -106,7 +137,7 @@ npm run pack:conformance
 npm run test:conformance:consumer
 ```
 
-The consumer check packs and installs the actual tarball into an unrelated temporary directory, then invokes its installed `vrt-conformance` executable for both original reference modes and the cancellation, authentication and server tool-stream profiles, including missing-scenario detection. It requires registry access or a populated npm cache for existing runtime dependencies. The package is marked private to prevent accidental registry publication; `npm pack` and local installation still work. Package-name availability and public release are not claimed.
+The consumer check packs and installs the actual tarball into an unrelated temporary directory, then invokes its installed `vrt-conformance` executable for both original reference modes and the cancellation, authentication, server tool-stream and server heartbeat profiles, including missing-scenario detection. It requires registry access or a populated npm cache for existing runtime dependencies. The package is marked private to prevent accidental registry publication; `npm pack` and local installation still work. Package-name availability and public release are not claimed.
 
 Build copies current schema, shared vectors, capability registry and scenarios into `dist/assets` and includes LICENSE. Installed CLI asset paths are relative to the executable, never the checkout/current directory. Official reference drivers are bundled from the locally built SDK; they therefore test that build, not whichever SDK an external user happens to have installed. To test a different implementation, supply its own executable following [driver-protocol.md](driver-protocol.md).
 

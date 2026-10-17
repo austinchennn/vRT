@@ -2,6 +2,7 @@ import type { CaseResult, Profile, Report, Wire } from '../report.js';
 import { cancellation, CANCELLATION_CASES, IncompleteDriver } from './cancellation.js';
 import { authCredentials, authenticateScenario, AUTH_CASES, AUTH_PROFILE, IncompleteAuthDriver } from './auth.js';
 import { serverToolStream, STREAM_CASES, STREAM_PROFILE, IncompleteStream } from './server-tool-stream.js';
+import { serverHeartbeat, HEARTBEAT_CASES, HEARTBEAT_PROFILE, IncompleteHeartbeat } from './server-heartbeat.js';
 import { assets } from './assets.js';
 import { until } from './deadline.js';
 import { ProcessDriver } from './process-driver.js';
@@ -9,7 +10,7 @@ import { dial, listen, type Peer } from './ws-peer.js';
 
 export interface Options {
   mode: 'client' | 'server'; command?: string; args: string[];
-  url?: string; profile?: Profile; timeoutMs: number; assets: string;
+  url?: string; profile?: Profile; heartbeatTimeoutMs?: number; timeoutMs: number; assets: string;
 }
 const PCM = { encoding: 'pcm16', sampleRate: 24000 };
 const CALL = 'conformance-call';
@@ -20,6 +21,10 @@ export async function run(options: Options): Promise<Report> {
   if (profile === 'tool-cancellation-v1' && options.mode !== 'client') throw new Error('tool-cancellation-v1 only supports client mode');
   if (profile === AUTH_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-auth-v1 requires server mode and --exec');
   if (profile === STREAM_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-tool-stream-v1 requires server mode and --exec');
+  if (profile === HEARTBEAT_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-heartbeat-v1 requires server mode and --exec');
+  const heartbeatTimeout = options.heartbeatTimeoutMs ?? 1200;
+  if (profile === HEARTBEAT_PROFILE && (!Number.isInteger(heartbeatTimeout) || heartbeatTimeout < 100 || heartbeatTimeout > 60000)) throw new Error('Invalid local heartbeat timeout policy');
+  const settings = { timeoutMs: heartbeatTimeout, delayAllowanceMs: Math.ceil(heartbeatTimeout / 2), resumeWindowMs: heartbeatTimeout * 6 };
   const report: Report = {
     protocol: 1, profile, fullSuite: 'incomplete', mode: options.mode,
     capabilities: [], cases: [], remaining: ['resume/replay', 'heartbeat', 'audio', 'queued/running cancellation', 'optional capabilities', 'server interruption routing'],
@@ -29,7 +34,8 @@ export async function run(options: Options): Promise<Report> {
   else report.remaining = report.remaining.map(item => item === 'queued/running cancellation' ? item + ' (separate profile)' : item);
   if (profile === AUTH_PROFILE) report.remaining.unshift('handshake/interrupt baseline (separate profile)', 'resume principal isolation');
   if (profile === STREAM_PROFILE) report.remaining.unshift('handshake/auth/cancellation (separate profiles)', 'client tool-stream observations', 'additional capability matrices');
-  const required = profile === STREAM_PROFILE ? STREAM_CASES : profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
+  if (profile === HEARTBEAT_PROFILE) report.remaining = ['client heartbeat SHOULD behavior', 'other profiles (separately selected)', 'full bidirectional resume/replay', 'binary/audio exception matrices', 'WebSocket control-frame timing interpretation', 'Python network driver'];
+  const required = profile === HEARTBEAT_PROFILE ? HEARTBEAT_CASES : profile === STREAM_PROFILE ? STREAM_CASES : profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
     ? ['client/handshake/baseline', 'client/interrupt/stale-call']
     : ['server/handshake/baseline', 'server/handshake/version'];
   for (const id of required) {
@@ -38,11 +44,13 @@ export async function run(options: Options): Promise<Report> {
     if (definitions.length === 0) report.cases.push({ id, status: 'incomplete', durationMs: 0, expected: 'Required profile scenario present', actual: 'Missing scenario definition', stage: 'inventory' });
   }
   for (const scenario of selected) {
-    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES, ...STREAM_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
+    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES, ...STREAM_CASES, ...HEARTBEAT_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
     const start = performance.now(); const end = start + options.timeoutMs;
     let stage = 'setup';
     const credentials = profile === AUTH_PROFILE ? authCredentials() : undefined;
     const result: CaseResult = { ...scenario, status: 'fail', durationMs: 0, actual: null, stage };
+    const heartbeatEvidence: Wire = profile === HEARTBEAT_PROFILE ? { settings: { clock: 'virtual', ...settings } } : {};
+    const extraPeers: Peer[] = [];
     let peer: Peer | undefined;
     let host: Awaited<ReturnType<typeof listen>> | undefined;
     let driver: ProcessDriver | undefined;
@@ -87,15 +95,25 @@ export async function run(options: Options): Promise<Report> {
         let url = options.url;
         if (options.command) {
           driver = new ProcessDriver(options.command, options.args);
-          stage = 'server ready'; const info = await driver.request('ready', credentials ? { profile: AUTH_PROFILE, authToken: credentials.token } : profile === STREAM_PROFILE ? { profile, argumentStreaming: !scenario.id.endsWith('no-delta') } : {}, end);
+          let readyData: Wire = {};
+          if (credentials) readyData = { profile: AUTH_PROFILE, authToken: credentials.token };
+          else if (profile === STREAM_PROFILE) readyData = { profile, argumentStreaming: !scenario.id.endsWith('no-delta') };
+          else if (profile === HEARTBEAT_PROFILE) readyData = { profile, timeoutMs: settings.timeoutMs, resumeWindowMs: settings.resumeWindowMs, holdOpening: scenario.id.endsWith('pong-opening') };
+          stage = 'server ready'; const info = await driver.request('ready', readyData, end);
           if (credentials && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.includes(AUTH_PROFILE))) throw new IncompleteAuthDriver('Driver does not advertise server-auth-v1 instrumentation');
           if (profile === STREAM_PROFILE && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.every((token: unknown) => typeof token === 'string') || !info.driverCapabilities.includes(STREAM_PROFILE))) throw new IncompleteStream('Driver lacks server-tool-stream-v1 instrumentation');
+          if (profile === HEARTBEAT_PROFILE) {
+            if (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.includes(HEARTBEAT_PROFILE) || info.timing?.clock !== 'virtual') throw new IncompleteHeartbeat('Driver lacks virtual server-heartbeat-v1 instrumentation');
+            if (Object.entries(settings).some(([key, value]) => info.timing[key] !== value)) throw new Error('Driver timing configuration mismatch');
+          }
           url = info.url;
         }
         if (typeof url !== 'string' || !/^wss?:\/\//.test(url)) throw new Error('Server mode needs --url or driver ready.url');
         if (credentials && (url.includes(credentials.token) || url.includes(credentials.wrongToken))) throw new Error('Driver URL must not contain a test credential');
         peer = await dial(url, end);
-        if (profile === STREAM_PROFILE) {
+        if (profile === HEARTBEAT_PROFILE) {
+          result.actual = await serverHeartbeat(scenario.id, peer, extraPeers, driver!, oracle, baselineHello, url, settings, end, value => { stage = value; }, heartbeatEvidence);
+        } else if (profile === STREAM_PROFILE) {
           const actual = await serverToolStream(scenario.id, peer, driver!, oracle, baselineHello, end, value => { stage = value; });
           result.actual = actual;
           report.capabilities = [...new Set([...report.capabilities, ...actual.capabilities])];
@@ -123,12 +141,12 @@ export async function run(options: Options): Promise<Report> {
       }
       result.status = 'pass';
     } catch (error) {
-      if (error instanceof IncompleteStream || error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
-      result.actual = { error: error instanceof Error ? error.message : String(error), trace: peer?.messages ?? [], close: peer?.closeInfo };
+      if (error instanceof IncompleteHeartbeat || error instanceof IncompleteStream || error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
+      result.actual = { error: error instanceof Error ? error.message : String(error), trace: peer?.messages ?? [], close: peer?.closeInfo, ...(profile === HEARTBEAT_PROFILE ? { heartbeat: heartbeatEvidence } : {}) };
     }
     finally {
       // Stop untrusted processes even when their protocol is broken, then close sockets.
-      const cleanup = await Promise.allSettled([driver?.stop(), peer?.dispose()]);
+      const cleanup = await Promise.allSettled([driver?.stop(), peer?.dispose(), ...extraPeers.map(extra => extra.dispose())]);
       try { await host?.close(); } catch (error) { cleanup.push({ status: 'rejected', reason: error }); }
       const failed = cleanup.find(c => c.status === 'rejected');
       if (failed?.status === 'rejected') { result.status = 'fail'; result.actual = { previous: result.actual, cleanup: String(failed.reason) }; }
