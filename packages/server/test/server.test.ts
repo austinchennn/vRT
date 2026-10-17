@@ -295,6 +295,48 @@ describe('resume and heartbeat', () => {
     expect(model.sessions).toHaveLength(1);
   });
 
+  it.each([0, 1])('checks replay completeness after ACK deletion for cursor %i (§5.4)', async (cursor) => {
+    const { model, connect, hub } = setup();
+    const first = connect();
+    const second = connect();
+    try {
+      first.send({ type: 'hello', tools: [] });
+      await expect.poll(() => first.socket.ofType('ready').length).toBe(1);
+      const sessionId = first.socket.ofType('ready')[0]!.sessionId;
+      const fake = model.session;
+      fake.emit({ type: 'input.transcript', itemId: 'u1', text: 'one', final: true });
+      fake.emit({ type: 'input.transcript', itemId: 'u2', text: 'two', final: true });
+      expect(first.socket.ofType('transcript').map((message) => message.seq)).toEqual([1, 2]);
+      first.send({ type: 'ack', upTo: 1 });
+      // receive() handles ACK synchronously; no timing delay is needed before disconnect.
+      first.connection.closed();
+      second.send({ type: 'hello', tools: [], sessionId, resumeFrom: cursor });
+      if (cursor === 0) {
+        await expect.poll(() => fake.closed).toBe(true);
+        expect(second.socket.ofType('error')).toMatchObject([
+          { code: 'RESUME_FAILED', recoverable: false, seq: 3 },
+        ]);
+        expect(second.socket.ofType('transcript')).toEqual([]);
+        expect(second.socket.closedWith).toBeDefined();
+        expect(hub.size).toBe(0);
+        // §5.4 permits ready before replay fails; a bound error is sequenced (§4.1).
+      } else {
+        await expect.poll(() => second.socket.ofType('transcript').length).toBe(1);
+        expect(second.socket.ofType('ready')).toMatchObject([{ sessionId, resumedFrom: 0 }]);
+        expect(second.socket.ofType('transcript')).toMatchObject([{ seq: 2, text: 'two' }]);
+        expect(second.socket.ofType('error')).toEqual([]);
+        expect(second.socket.closedWith).toBeUndefined();
+        expect(fake.closed).toBe(false);
+      }
+    } finally {
+      first.connection.closed();
+      second.connection.closed();
+      await hub.close();
+      model.clock.runAll(); // Drain parked-session expiry in this eventless fake socket.
+      expect(model.clock.pending).toBe(0);
+    }
+  });
+
   it('fails a resume from a seq the server never sent', async () => {
     const { model, connect } = setup();
     const first = connect();
