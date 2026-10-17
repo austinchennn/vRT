@@ -372,7 +372,9 @@ export class AgentSession {
     on('tool.call.delta', (event) => {
       const epoch = this.#liveEpoch(event.responseId);
       const turn = this.#turn;
-      if (epoch === undefined || !turn) return;
+      // Issued calls keep their records until the response ends, even after a
+      // stream tombstone is evicted. No argument fragment may follow issuance.
+      if (epoch === undefined || !turn || this.#calls.has(event.callId)) return;
       this.#emitter.emit({ type: 'tool.call.delta', callId: event.callId, epoch, name: event.name, argumentsDelta: event.argumentsDelta });
       this.#streams.delta({ callId: event.callId, name: event.name, epoch, turnId: turn.id, responseId: event.responseId }, event.argumentsDelta);
     });

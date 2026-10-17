@@ -85,4 +85,4 @@ session.on('reconnecting', ({ attempt }) => banner.show(`Reconnecting (${attempt
 session.on('closed', () => previews.clearAll());
 ```
 
-`tool.stream` reports every call's lifecycle, server or app, and always ends a call with one terminal phase. A local `interrupt()` ends open calls as `cancelled` at once. See [Tools](/concepts/tools/#watching-a-call-tool-streams).
+`tool.stream` reports every call's lifecycle, server or app, and ends a call with one terminal phase unless the session ends first. Clear application preview state on the public `closed` event; the client does not synthesize per-call terminals on close. A local `interrupt()` ends open calls as `cancelled` at once. See [Tools](/concepts/tools/#watching-a-call-tool-streams).

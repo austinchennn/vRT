@@ -443,6 +443,8 @@ export class ClientSession {
 
   #onToolStream(event: ToolStreamEvent): void {
     this.#emitter.emit(event);
+    // A synchronous listener may interrupt or close before the derived preview.
+    if (this.#closing || this.#gate.isClosed(event.epoch)) return;
     // The 1.0 preview too, so apps written against tool.preview keep working.
     const preview = { type: 'tool.preview', callId: event.callId, name: event.name, epoch: event.epoch } as const;
     if (event.phase === 'arguments-delta') this.#emitter.emit({ ...preview, preview: { argumentsDelta: event.delta } });
