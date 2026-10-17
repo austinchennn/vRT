@@ -1,0 +1,12 @@
+[
+  {
+    "profile": "tool-cancellation-v1",
+    "id": "client/cancellation/queued-running",
+    "expected": "A starts and receives cancellation; B/C never start; all calls settle INTERRUPTED once through late completion and close fence"
+  },
+  {
+    "profile": "tool-cancellation-v1",
+    "id": "client/cancellation/late-rejection",
+    "expected": "A starts and receives cancellation; B/C never start; all calls settle INTERRUPTED once through late completion and close fence"
+  }
+]
