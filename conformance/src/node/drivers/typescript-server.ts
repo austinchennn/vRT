@@ -4,17 +4,23 @@ import { fakeModel } from '@vrealtime/testing';
 import { heartbeatServer } from './server-heartbeat.js';
 import { streamServer } from './server-tool-stream.js';
 import { inputServer } from './server-input.js';
+import { resumeServer } from './server-resume.js';
 import { control } from './control.js';
 let heartbeat: Awaited<ReturnType<typeof heartbeatServer>> | undefined;
 let stream: Awaited<ReturnType<typeof streamServer>> | undefined;
 let input: Awaited<ReturnType<typeof inputServer>> | undefined;
+let resume: Awaited<ReturnType<typeof resumeServer>> | undefined;
 let running: RunningServer | undefined;
-async function close(): Promise<void> { const current = running; running = undefined; await current?.close(); await stream?.close(); await heartbeat?.close(); await input?.close(); }
+async function close(): Promise<void> { const current = running; running = undefined; await current?.close(); await stream?.close(); await heartbeat?.close(); await input?.close(); await resume?.close(); }
 control(async (command, data) => {
   if (command === 'ready') {
     if (data.profile === 'server-input-validation-v1') {
       input = await inputServer();
       return { url: input.url, driverCapabilities: ['server-input-validation-v1'] };
+    }
+    if (data.profile === 'server-resume-replay-v1') {
+      resume = await resumeServer();
+      return { url: resume.url, driverCapabilities: ['server-resume-replay-v1'] };
     }
     if (data.profile === 'server-heartbeat-v1') {
       heartbeat = await heartbeatServer(data);
@@ -34,6 +40,7 @@ control(async (command, data) => {
     return { url: running.url.replace('http:', 'ws:'), ...(authenticated ? { driverCapabilities: ['server-auth-v1'] } : {}) };
   }
   if (command === 'close') { await close(); return {}; }
+  if (resume) return resume.handle(command, data);
   if (input) return input.handle(command);
   if (heartbeat) return heartbeat.handle(command, data);
   if (stream) return stream.handle(command, data);
