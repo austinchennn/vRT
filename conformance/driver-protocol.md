@@ -129,6 +129,21 @@ The driver owns its SDK, listeners, application tasks, timers and any child reso
 The runner cannot prove a dishonest driver accurately reports effects or has drained arbitrary future work. Review external drivers as trusted instrumentation, and report unsupported operations as incomplete/failure rather than pretending the implementation passed. This contract does not provide full session conformance or certification.
 
 
+## Opt-in `server-input-validation-v1` instrumentation
+
+This is a test profile identifier, not a negotiated vRT capability. Old `ready {}` and all existing profiles retain their meaning. Every case owns one process and isolated anonymous server/model. New operations use the same requestId/error/EOF/deadline rules above:
+
+| Command | Data | Confirmation |
+|---|---|---|
+| `ready` | `{profile: "server-input-validation-v1"}` | Start an OS-assigned loopback listener with a deterministic, inert model supporting PCM16/24000 mono. Return `{url, driverCapabilities:["server-input-validation-v1"]}` only when listening. No scripts, tools, automatic model responses or background input producers. |
+| `readInputs` | `{}` | Return a public model snapshot: `{sessions, texts:string[], audio:[{hex,format:{encoding,sampleRate,channels}}]}`. sessions counts all model connections since startup, including closed ones. Model command observations must include invalid input if the SDK incorrectly forwards it; do not filter it away. |
+| `finishInputs` | `{}` | Once: after the runner's ordered network receipt fence, drain the fixture's owned work and attached SDK continuations, emit one public model input.transcript event (`itemId:"input-finish-marker", text:"input-observation-marker", final:true`), return the final snapshot and keep the connection open. No later scenario effects may be scheduled. |
+| `close` | `{}` | Close server, sessions, listeners and owned work; repeat and stdin EOF safe. |
+
+The official driver uses public `fakeModel({onCommand})`, its public sessions collection and `serve`; it never sends expected error frames itself. Audio snapshots contain actual bytes (lowercase hex) and model-facing formats; do not omit empty observations when forwarded by the SDK. A legal empty frame may instead be ignored by an implementation. Limits: 64 observed texts of at most 1024 characters, 64 audio chunks of at most 1024 bytes; overflow errors instead of truncating to a passing subset. The runner sends far fewer/smaller inputs. Missing snapshot fields are failures.
+
+A pong receipt fence establishes that preceding frames reached the server; it does not alone prove all asynchronous application work completed. finish must honor the bounded, inert-fixture drain promise. The official driver drains attached continuations through an event-loop fence. Runner then fences the live wire and closes before final trace validation. This is trusted finite instrumentation, not arbitrary-task scheduling control, OS isolation, process-tree supervision or full compatibility certification. Unsupported instrumentation yields incomplete/nonzero. Errors, early connection close, command timeout and process exit retain bounded direct-child cleanup.
+
 ## Opt-in `client-control-validation-v1` instrumentation
 
 This client-only profile is a test contract, not a wire capability. The runner starts a dynamic loopback WebSocket server and supplies VRT_CONFORMANCE_URL. All commands use the existing requestId, stdout-only-JSONL, stderr logging, deadline, error and EOF rules. Each case owns a fresh process and SDK.

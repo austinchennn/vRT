@@ -44,6 +44,13 @@ try {
   assert.equal(heartbeat.cases.length, 8);
   assert.ok(heartbeat.cases.every(c => c.status === 'pass'), JSON.stringify(heartbeat));
   assert.equal(heartbeat.fullSuite, 'incomplete');
+  const inputArgs = ['server', '--profile', 'server-input-validation-v1', '--exec', process.execPath, '--json', '--', join(pkg, 'dist/node/drivers/typescript-server.js')];
+  const input = JSON.parse(execFileSync(cli, inputArgs, { cwd: temp, encoding: 'utf8', timeout: 15000 }));
+  assert.equal(input.profile, 'server-input-validation-v1');
+  assert.equal(input.cases.length, 7);
+  assert.ok(input.cases.every(item => item.status === 'pass'), JSON.stringify(input));
+  assert.equal(input.fullSuite, 'incomplete');
+  assert.deepEqual(input.capabilities, []);
   const controlArgs = ['client', '--profile', 'client-control-validation-v1', '--exec', process.execPath, '--json', '--', join(pkg, 'dist/node/drivers/typescript-client.js')];
   const control = JSON.parse(execFileSync(cli, controlArgs, { cwd: temp, encoding: 'utf8', timeout: 15000 }));
   assert.equal(control.profile, 'client-control-validation-v1');
@@ -78,6 +85,11 @@ try {
   assert.throws(() => execFileSync(cli, heartbeatArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
     const report = JSON.parse(error.stdout);
     return error.status === 1 && report.cases.some(c => c.id === 'server/heartbeat/idle-resume' && c.status === 'incomplete');
+  });
+  writeFileSync(inventory, JSON.stringify(definitions.filter(item => item.id !== 'server/input/binary-post')));
+  assert.throws(() => execFileSync(cli, inputArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
+    const report = JSON.parse(error.stdout);
+    return error.status === 1 && report.cases.some(item => item.id === 'server/input/binary-post' && item.status === 'incomplete' && item.stage === 'inventory');
   });
   writeFileSync(inventory, JSON.stringify(definitions.filter(item => item.id !== 'client/control/state-call')));
   assert.throws(() => execFileSync(cli, controlArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
