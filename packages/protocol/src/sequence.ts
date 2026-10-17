@@ -14,8 +14,8 @@ export class Outbox<M extends Message> {
   #seq = 0;
   #unacked: M[] = [];
   readonly #limit: number;
-  /** Highest seq dropped unacknowledged because of `limit`; peers behind it cannot resume. */
-  #droppedUpTo = 0;
+  /** Highest seq removed by ACK or eviction; peers behind it cannot fully resume (§5.4). */
+  #removedThrough = 0;
 
   constructor(limit = 1024) {
     this.#limit = limit;
@@ -34,7 +34,7 @@ export class Outbox<M extends Message> {
     const full = { v: PROTOCOL_VERSION, seq: transient ? 0 : ++this.#seq, ...message } as unknown as M;
     if (!transient) {
       this.#unacked.push(full);
-      if (this.#unacked.length > this.#limit) this.#droppedUpTo = this.#unacked.shift()!.seq;
+      if (this.#unacked.length > this.#limit) this.#removedThrough = this.#unacked.shift()!.seq;
     }
     return full;
   }
@@ -43,7 +43,10 @@ export class Outbox<M extends Message> {
   ack(upTo: number): void {
     let drop = 0;
     while (drop < this.#unacked.length && this.#unacked[drop]!.seq <= upTo) drop++;
-    if (drop > 0) this.#unacked.splice(0, drop);
+    if (drop > 0) {
+      this.#removedThrough = this.#unacked[drop - 1]!.seq;
+      this.#unacked.splice(0, drop);
+    }
   }
 
   /**
@@ -51,7 +54,7 @@ export class Outbox<M extends Message> {
    * some of them were already dropped, or `lastSeen` is ahead of anything sent.
    */
   resendFrom(lastSeen: number): M[] | undefined {
-    if (lastSeen < this.#droppedUpTo || lastSeen > this.#seq) return undefined;
+    if (lastSeen < this.#removedThrough || lastSeen > this.#seq) return undefined;
     return this.#unacked.filter((message) => message.seq > lastSeen);
   }
 }

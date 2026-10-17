@@ -10,22 +10,26 @@ try {
   const driverArgs = split < 0 ? [] : process.argv.slice(split + 1);
   const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
     profile: { type: 'string', default: 'handshake-interrupt-v1' }, exec: { type: 'string' }, url: { type: 'string' }, json: { type: 'boolean' },
+    'heartbeat-timeout-ms': { type: 'string' },
     'timeout-ms': { type: 'string', default: '5000' },
   } });
   const mode = positionals[0];
   const profile = values.profile;
-  if (profile !== 'handshake-interrupt-v1' && profile !== 'tool-cancellation-v1' && profile !== 'server-auth-v1' && profile !== 'server-tool-stream-v1' && profile !== 'client-control-validation-v1') throw new Error('Unknown profile');
+  if (profile !== 'handshake-interrupt-v1' && profile !== 'tool-cancellation-v1' && profile !== 'server-auth-v1' && profile !== 'server-tool-stream-v1' && profile !== 'server-heartbeat-v1' && profile !== 'client-control-validation-v1') throw new Error('Unknown profile');
   if (profile === 'tool-cancellation-v1' && mode !== 'client') throw new Error('Cancellation profile requires client mode');
   if (profile === 'server-auth-v1' && (mode !== 'server' || !values.exec || values.url)) throw new Error('server-auth-v1 requires server mode and --exec');
   if (profile === 'server-tool-stream-v1' && (mode !== 'server' || !values.exec || values.url)) throw new Error('server-tool-stream-v1 requires server mode and --exec');
+  if (profile === 'server-heartbeat-v1' && (mode !== 'server' || !values.exec || values.url)) throw new Error('server-heartbeat-v1 requires server mode and --exec');
   if (profile === 'client-control-validation-v1' && (mode !== 'client' || !values.exec || values.url)) throw new Error('client-control-validation-v1 requires client mode and --exec');
+  const heartbeatTimeoutMs = Number(values['heartbeat-timeout-ms'] ?? '1200');
+  if (!Number.isInteger(heartbeatTimeoutMs) || heartbeatTimeoutMs < 100 || heartbeatTimeoutMs > 60000 || (values['heartbeat-timeout-ms'] !== undefined && profile !== 'server-heartbeat-v1')) throw new Error('heartbeat-timeout-ms requires heartbeat profile and integer 100..60000');
   const timeoutMs = Number(values['timeout-ms']);
   if (positionals.length !== 1 || (mode !== 'client' && mode !== 'server') || !Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60000) {
-    throw new Error('Usage: vrt-conformance client|server [--exec PROGRAM | --url WS_URL] [--json] [--profile NAME] [--timeout-ms 5000] -- DRIVER_ARGS (timeout 1..60000 ms)');
+    throw new Error('Usage: vrt-conformance client|server [--exec PROGRAM | --url WS_URL] [--json] [--profile NAME] [--timeout-ms 5000] [--heartbeat-timeout-ms 1200] -- DRIVER_ARGS (timeout 1..60000 ms)');
   }
   if (!values.exec && (mode === 'client' || !values.url)) throw new Error('Missing --exec or --url');
   if (values.exec && values.url) throw new Error('Choose --exec or --url, not both');
-  const report = await run({ mode, profile, args: driverArgs, timeoutMs,
+  const report = await run({ mode, profile, heartbeatTimeoutMs, args: driverArgs, timeoutMs,
     assets: join(dirname(fileURLToPath(import.meta.url)), '../assets'),
     ...(values.exec ? { command: values.exec } : {}), ...(values.url ? { url: values.url } : {}),
   });

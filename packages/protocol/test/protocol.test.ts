@@ -141,9 +141,79 @@ describe('sequencing', () => {
     expect(out.pending).toBe(2);
     expect(out.resendFrom(1)).toEqual([b]);
     out.ack(1);
-    expect(out.resendFrom(0)).toEqual([b]);
+    expect(out.resendFrom(0)).toBeUndefined();
+    expect(out.resendFrom(1)).toEqual([b]);
     out.ack(2);
     expect(out.resendFrom(2)).toEqual([]);
+  });
+
+  it('requires a complete replay after partial and complete cumulative ACKs (§5.4)', () => {
+    const out = new Outbox<ServerMessage>();
+    const messages = [1, 2, 3].map((epoch) => out.stamp({ type: 'interrupted', epoch }));
+    out.ack(2);
+    expect(out.pending).toBe(1);
+    expect(out.lastSeq).toBe(3);
+    expect(out.resendFrom(0)).toBeUndefined();
+    expect(out.resendFrom(1)).toBeUndefined();
+    expect(out.resendFrom(2)).toEqual([messages[2]]);
+    out.ack(2); // Duplicate and stale ACKs cannot move the loss boundary backwards.
+    out.ack(1);
+    expect(out.resendFrom(1)).toBeUndefined();
+    expect(out.resendFrom(2)).toEqual([messages[2]]);
+    out.ack(3);
+    expect(out.pending).toBe(0);
+    expect(out.resendFrom(2)).toBeUndefined();
+    expect(out.resendFrom(3)).toEqual([]);
+  });
+
+  it('does not grant future credit for an ahead ACK (§4.2)', () => {
+    const out = new Outbox<ServerMessage>();
+    out.ack(100); // No sent messages to remove yet.
+    const first = out.stamp({ type: 'interrupted', epoch: 1 });
+    expect(out.resendFrom(0)).toEqual([first]);
+    out.ack(100);
+    expect(out.resendFrom(0)).toBeUndefined();
+    expect(out.resendFrom(1)).toEqual([]);
+    const second = out.stamp({ type: 'interrupted', epoch: 2 });
+    expect(second.seq).toBe(2);
+    expect(out.pending).toBe(1);
+    expect(out.resendFrom(1)).toEqual([second]);
+    expect(out.resendFrom(2)).toEqual([]);
+    expect(out.resendFrom(3)).toBeUndefined();
+  });
+
+  it('preserves the loss boundary across eviction, ACKs and transients', () => {
+    const out = new Outbox<ServerMessage>(2);
+    out.stamp({ type: 'interrupted', epoch: 1 });
+    out.stamp({ type: 'interrupted', epoch: 2 });
+    const third = out.stamp({ type: 'interrupted', epoch: 3 }); // Evicts seq 1.
+    out.ack(2);
+    expect(out.stamp({ type: 'pong' }).seq).toBe(0);
+    expect(out.stamp({ type: 'audio.start', itemId: 'a', responseId: 'r', epoch: 3 }).seq).toBe(0);
+    out.ack(0);
+    expect(out.pending).toBe(1);
+    expect(out.lastSeq).toBe(3);
+    expect(out.resendFrom(1)).toBeUndefined();
+    expect(out.resendFrom(2)).toEqual([third]);
+    const fourth = out.stamp({ type: 'interrupted', epoch: 4 });
+    const fifth = out.stamp({ type: 'interrupted', epoch: 5 }); // Evicts seq 3.
+    out.ack(2); // ACK behind the eviction boundary must not lower it.
+    expect(out.resendFrom(2)).toBeUndefined();
+    expect(out.resendFrom(3)).toEqual([fourth, fifth]);
+    out.ack(4);
+    expect(out.resendFrom(3)).toBeUndefined();
+    expect(out.resendFrom(4)).toEqual([fifth]);
+  });
+
+  it('keeps ACK and replay boundaries independent between instances', () => {
+    const first = new Outbox<ServerMessage>();
+    const second = new Outbox<ServerMessage>();
+    first.stamp({ type: 'interrupted', epoch: 1 });
+    const kept = second.stamp({ type: 'interrupted', epoch: 1 });
+    first.ack(1);
+    expect(first.resendFrom(0)).toBeUndefined();
+    expect(second.resendFrom(0)).toEqual([kept]);
+    expect(second.pending).toBe(1);
   });
 
   it('refuses to resume past dropped messages', () => {

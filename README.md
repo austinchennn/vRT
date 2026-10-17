@@ -158,7 +158,7 @@ npm run build && npm run check:budgets && npm run bench
 
 The partial [black-box conformance profiles](conformance/) check baseline handshakes
 and the client's local interrupt gate across real WebSockets and independent driver
-processes. Run `npm run test:conformance`; select `server-tool-stream-v1` explicitly for server capability/lifecycle checks (see the linked guide). Select `client-control-validation-v1` for post-ready client invalid-control handling. Passing selected profiles is not full protocol certification.
+processes. Run `npm run test:conformance`; select `server-tool-stream-v1` for server capability/lifecycle checks or `server-heartbeat-v1` for server heartbeat/activity-timeout checks (see the linked guide). Select `client-control-validation-v1` for client invalid-control handling. Passing selected profiles is not full protocol certification.
 
 ## Documentation
 

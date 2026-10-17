@@ -6,7 +6,7 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 const out = join(root, 'dist');
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, 'assets'), { recursive: true });
-for (const entry of ['cli', 'drivers/typescript-client', 'drivers/typescript-server', 'fixtures/broken-client', 'fixtures/reject-server', 'fixtures/cancellation-client', 'fixtures/auth-server', 'fixtures/tool-stream-server', 'fixtures/held-tool-stream', 'fixtures/control-client']) {
+for (const entry of ['cli', 'drivers/typescript-client', 'drivers/typescript-server', 'fixtures/broken-client', 'fixtures/reject-server', 'fixtures/cancellation-client', 'fixtures/auth-server', 'fixtures/tool-stream-server', 'fixtures/held-tool-stream', 'fixtures/heartbeat-server', 'fixtures/held-heartbeat', 'fixtures/control-client']) {
   await build({ entryPoints: [join(root, `src/node/${entry}.ts`)], outfile: join(out, `node/${entry}.js`),
     bundle: true, platform: 'node', format: 'esm', target: 'node22', packages: 'external',
     // Reference drivers travel with the package; no SDK dependency is imposed on external drivers.
@@ -18,7 +18,7 @@ for (const entry of ['cli', 'drivers/typescript-client', 'drivers/typescript-ser
 cpSync(join(root, '../spec/schema'), join(out, 'assets/schema'), { recursive: true });
 cpSync(join(root, '../spec/examples'), join(out, 'assets/examples'), { recursive: true });
 cpSync(join(root, '../spec/capabilities.json'), join(out, 'assets/capabilities.json'));
-const scenarios = ['phase1', 'cancellation', 'auth', 'server-tool-stream', 'client-control'].flatMap(name => JSON.parse(readFileSync(join(root, `scenarios/${name}.json`), 'utf8')));
+const scenarios = ['phase1', 'cancellation', 'auth', 'server-tool-stream', 'server-heartbeat', 'client-control'].flatMap(name => JSON.parse(readFileSync(join(root, `scenarios/${name}.json`), 'utf8')));
 writeFileSync(join(out, 'assets/scenarios.json'), JSON.stringify(scenarios, null, 2));
 cpSync(join(root, '../LICENSE'), join(root, 'LICENSE'));
 chmodSync(join(out, 'node/cli.js'), 0o755);
