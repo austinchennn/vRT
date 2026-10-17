@@ -72,6 +72,13 @@ try {
   assert.ok(principal.cases.every(item => item.status === 'pass'), JSON.stringify(principal));
   assert.equal(principal.fullSuite, 'incomplete');
   assert.deepEqual(principal.capabilities, []);
+  const rejectionArgs = ['server', '--profile', 'server-resume-rejection-v1', '--exec', process.execPath, '--json', '--', join(pkg, 'dist/node/drivers/typescript-server.js')];
+  const rejection = JSON.parse(execFileSync(cli, rejectionArgs, { cwd: temp, encoding: 'utf8', timeout: 15000 }));
+  assert.equal(rejection.profile, 'server-resume-rejection-v1');
+  assert.equal(rejection.cases.length, 4);
+  assert.ok(rejection.cases.every(item => item.status === 'pass'), JSON.stringify(rejection));
+  assert.equal(rejection.fullSuite, 'incomplete');
+  assert.deepEqual(rejection.capabilities, []);
   // A partial/corrupt scenario inventory must not silently become a smaller passing profile.
   const inventory = join(pkg, 'dist/assets/scenarios.json');
   const definitions = JSON.parse(readFileSync(inventory, 'utf8'));
@@ -119,6 +126,11 @@ try {
   assert.throws(() => execFileSync(cli, principalArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
     const report = JSON.parse(error.stdout);
     return error.status === 1 && report.cases.some(item => item.id === 'server/resume-principal/reauth' && item.status === 'incomplete' && item.stage === 'inventory');
+  });
+  writeFileSync(inventory, JSON.stringify(definitions.filter(item => item.id !== 'server/resume-rejection/ack-history')));
+  assert.throws(() => execFileSync(cli, rejectionArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
+    const report = JSON.parse(error.stdout);
+    return error.status === 1 && report.cases.some(item => item.id === 'server/resume-rejection/ack-history' && item.status === 'incomplete' && item.stage === 'inventory');
   });
   console.log('Packed CLI passes client/server profile outside repository, no SDK installation required');
 } finally { rmSync(temp, { recursive: true, force: true }); }

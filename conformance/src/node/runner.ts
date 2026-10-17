@@ -1,3 +1,5 @@
+import { REJECTION_PROFILE, REJECTION_CASES, IncompleteRejection } from '../resume-rejection-oracle.js';
+import { serverResumeRejection } from './server-resume-rejection.js';
 import { PRINCIPAL_PROFILE, PRINCIPAL_CASES, IncompletePrincipal } from '../principal-oracle.js';
 import { principalCredentials, serverPrincipal, PrincipalFailure } from './server-principal.js';
 import { RESUME_PROFILE, RESUME_CASES, IncompleteResume } from '../resume-oracle.js';
@@ -34,6 +36,7 @@ export async function run(options: Options): Promise<Report> {
   if (profile === CONTROL_PROFILE && (options.mode !== 'client' || !options.command || options.url)) throw new Error('client-control-validation-v1 requires client mode and --exec');
   if (profile === RESUME_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-resume-replay-v1 requires server mode and --exec');
   if (profile === PRINCIPAL_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-resume-principal-v1 requires server mode and --exec');
+  if (profile === REJECTION_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-resume-rejection-v1 requires server mode and --exec');
   const heartbeatTimeout = options.heartbeatTimeoutMs ?? 1200;
   if (profile === HEARTBEAT_PROFILE && (!Number.isInteger(heartbeatTimeout) || heartbeatTimeout < 100 || heartbeatTimeout > 60000)) throw new Error('Invalid local heartbeat timeout policy');
   const settings = { timeoutMs: heartbeatTimeout, delayAllowanceMs: Math.ceil(heartbeatTimeout / 2), resumeWindowMs: heartbeatTimeout * 6 };
@@ -51,7 +54,8 @@ export async function run(options: Options): Promise<Report> {
   if (profile === CONTROL_PROFILE) report.remaining = ['other profiles (selected separately)', 'pre-ready client errors', 'binary/audio', 'heartbeat', 'resume/replay', 'additional exception matrices', 'Python driver'];
   if (profile === RESUME_PROFILE) report.remaining = ['other profiles (selected separately)', 'client automatic/bidirectional recovery', 'ACK-deleted/evicted history', 'resume expiry/principal isolation', 'lost tool results', 'heartbeat/binary/audio', 'Python driver'];
   if (profile === PRINCIPAL_PROFILE) report.remaining = ['other profiles (selected separately)', 'automatic/bidirectional recovery', 'expiry/capacity', 'lost tool results', 'additional security matrices', 'Python driver'];
-  const required = profile === PRINCIPAL_PROFILE ? PRINCIPAL_CASES : profile === RESUME_PROFILE ? RESUME_CASES : profile === CONTROL_PROFILE ? CONTROL_CASES : profile === INPUT_PROFILE ? INPUT_CASES : profile === HEARTBEAT_PROFILE ? HEARTBEAT_CASES : profile === STREAM_PROFILE ? STREAM_CASES : profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
+  if (profile === REJECTION_PROFILE) report.remaining = ['other profiles (selected separately)', 'client/bidirectional recovery', 'resume expiry/principal isolation', 'capacity eviction', 'lost tool results', 'Python driver'];
+  const required = profile === REJECTION_PROFILE ? REJECTION_CASES : profile === PRINCIPAL_PROFILE ? PRINCIPAL_CASES : profile === RESUME_PROFILE ? RESUME_CASES : profile === CONTROL_PROFILE ? CONTROL_CASES : profile === INPUT_PROFILE ? INPUT_CASES : profile === HEARTBEAT_PROFILE ? HEARTBEAT_CASES : profile === STREAM_PROFILE ? STREAM_CASES : profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
     ? ['client/handshake/baseline', 'client/interrupt/stale-call']
     : ['server/handshake/baseline', 'server/handshake/version'];
   for (const id of required) {
@@ -60,7 +64,7 @@ export async function run(options: Options): Promise<Report> {
     if (definitions.length === 0) report.cases.push({ id, status: 'incomplete', durationMs: 0, expected: 'Required profile scenario present', actual: 'Missing scenario definition', stage: 'inventory' });
   }
   for (const scenario of selected) {
-    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES, ...STREAM_CASES, ...HEARTBEAT_CASES, ...INPUT_CASES, ...CONTROL_CASES, ...RESUME_CASES, ...PRINCIPAL_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
+    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES, ...STREAM_CASES, ...HEARTBEAT_CASES, ...INPUT_CASES, ...CONTROL_CASES, ...RESUME_CASES, ...PRINCIPAL_CASES, ...REJECTION_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
     const start = performance.now(); const end = start + options.timeoutMs;
     let stage = 'setup';
     const credentials = profile === AUTH_PROFILE ? authCredentials() : undefined;
@@ -119,7 +123,7 @@ export async function run(options: Options): Promise<Report> {
           else if (profile === STREAM_PROFILE) readyData = { profile, argumentStreaming: !scenario.id.endsWith('no-delta') };
           else if (profile === HEARTBEAT_PROFILE) readyData = { profile, timeoutMs: settings.timeoutMs, resumeWindowMs: settings.resumeWindowMs, holdOpening: scenario.id.endsWith('pong-opening') };
           else if (profile === INPUT_PROFILE) readyData = { profile };
-          else if (profile === RESUME_PROFILE) readyData = { profile };
+          else if (profile === RESUME_PROFILE || profile === REJECTION_PROFILE) readyData = { profile };
           else if (principalSecrets) readyData = { profile, tokens: principalSecrets.tokens };
           stage = 'server ready'; const info = await driver.request('ready', readyData, end);
           if (credentials && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.includes(AUTH_PROFILE))) throw new IncompleteAuthDriver('Driver does not advertise server-auth-v1 instrumentation');
@@ -131,13 +135,16 @@ export async function run(options: Options): Promise<Report> {
           if (profile === INPUT_PROFILE && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.every((token: unknown) => typeof token === 'string') || !info.driverCapabilities.includes(INPUT_PROFILE))) throw new IncompleteInput('Driver lacks server-input-validation-v1 instrumentation');
           if (profile === RESUME_PROFILE && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.every((token: unknown) => typeof token === 'string') || !info.driverCapabilities.includes(RESUME_PROFILE))) throw new IncompleteResume('Driver lacks server-resume-replay-v1 instrumentation');
           if (profile === PRINCIPAL_PROFILE && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.every((token: unknown) => typeof token === 'string') || !info.driverCapabilities.includes(PRINCIPAL_PROFILE))) throw new IncompletePrincipal('Driver lacks server-resume-principal-v1 instrumentation');
+          if (profile === REJECTION_PROFILE && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.every((token: unknown) => typeof token === 'string') || !info.driverCapabilities.includes(REJECTION_PROFILE) || info.retention?.acknowledged !== 'discard')) throw new IncompleteRejection('Driver lacks rejection instrumentation or acknowledged-history discard policy');
           url = info.url;
         }
         if (typeof url !== 'string' || !/^wss?:\/\//.test(url)) throw new Error('Server mode needs --url or driver ready.url');
         if (credentials && (url.includes(credentials.token) || url.includes(credentials.wrongToken))) throw new Error('Driver URL must not contain a test credential');
         if (principalSecrets?.contains(url)) throw new Error('Driver URL must not contain test credentials');
         peer = await dial(url, end);
-        if (principalSecrets) {
+        if (profile === REJECTION_PROFILE) {
+          result.actual = await serverResumeRejection(scenario.id, peer, url, driver!, oracle, baselineHello, end, value => { stage = value; });
+        } else if (principalSecrets) {
           result.actual = await serverPrincipal(scenario.id, peer, url, driver!, oracle, baselineHello, principalSecrets, end, value => { stage = value; });
         } else if (profile === RESUME_PROFILE) {
           result.actual = await serverResume(scenario.id, peer, url, driver!, oracle, baselineHello, end, value => { stage = value; });
@@ -173,7 +180,7 @@ export async function run(options: Options): Promise<Report> {
       }
       result.status = 'pass';
     } catch (error) {
-      if (error instanceof IncompleteResume || error instanceof IncompletePrincipal || error instanceof IncompleteControl || error instanceof IncompleteInput || error instanceof IncompleteHeartbeat || error instanceof IncompleteStream || error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
+      if (error instanceof IncompleteRejection || error instanceof IncompleteResume || error instanceof IncompletePrincipal || error instanceof IncompleteControl || error instanceof IncompleteInput || error instanceof IncompleteHeartbeat || error instanceof IncompleteStream || error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
       result.actual = { error: error instanceof Error ? error.message : String(error), trace: peer?.messages ?? [], close: peer?.closeInfo, ...(error instanceof PrincipalFailure ? { connections: error.connections } : {}), ...(error instanceof ResumeFailure ? { connections: error.connections } : {}), ...(profile === HEARTBEAT_PROFILE ? { heartbeat: heartbeatEvidence } : {}) };
     }
     finally {
