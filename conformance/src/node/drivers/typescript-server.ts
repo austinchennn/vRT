@@ -20,6 +20,10 @@ control(async (command, data) => {
       input = await inputServer();
       return { url: input.url, driverCapabilities: ['server-input-validation-v1'] };
     }
+    if (data.profile === 'server-resume-rejection-v1') {
+      resume = await resumeServer(true);
+      return { url: resume.url, driverCapabilities: ['server-resume-rejection-v1'], retention: { acknowledged: 'discard' } };
+    }
     if (data.profile === 'server-resume-replay-v1') {
       resume = await resumeServer();
       return { url: resume.url, driverCapabilities: ['server-resume-replay-v1'] };

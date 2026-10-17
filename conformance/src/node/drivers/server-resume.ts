@@ -8,7 +8,8 @@ import type { Wire } from '../../report.js';
 import { deferred } from '../deadline.js';
 
 /** Public SDK session/connection APIs behind an observable real WebSocket edge. */
-export async function resumeServer() {
+export async function resumeServer(rejection = false) {
+  const receivedAcks: { connection: number; upTo: number }[] = [];
   const contexts: unknown[] = []; const emitted: string[] = [];
   const records: { socket: WebSocket; closed: boolean; done: ReturnType<typeof deferred<void>> }[] = [];
   const changed = new Set<() => void>(); let failure: Error | undefined;
@@ -21,10 +22,24 @@ export async function resumeServer() {
   } });
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0, maxPayload: 65536 });
   server.on('connection', socket => {
-    if (records.length >= 2) { socket.close(1008, 'two connections per scenario'); return; }
+    if (records.length >= (rejection ? 3 : 2)) { socket.close(1008, 'scenario connection limit'); return; }
     const record = { socket, closed: false, done: deferred<void>() }; records.push(record);
     const connection = hub.attach({ send: data => socket.send(data), close: (code, reason) => socket.close(code, reason), get bufferedAmount() { return socket.bufferedAmount; } });
-    socket.on('message', (bytes, binary) => connection.receive(binary ? bytes : bytes.toString()));
+    socket.on('message', (bytes, binary) => {
+      connection.receive(binary ? bytes : bytes.toString());
+      // For this profile, receive() applies ACK synchronously before returning.
+      // This is an edge receipt confirmation, never a query of the SDK's Outbox.
+      if (rejection && !binary) {
+        try {
+          const message = JSON.parse(bytes.toString()) as Wire;
+          if (message.type === 'ack' && message.v === 1 && message.seq === 0 && Number.isInteger(message.upTo) && message.upTo >= 0 && message.upTo <= 0xffffffff) {
+            if (receivedAcks.length >= 8) failure = new Error('ACK observation bound exceeded');
+            else receivedAcks.push({ connection: records.indexOf(record) + 1, upTo: message.upTo });
+            notify();
+          }
+        } catch { /* malformed wire frames remain the SDK's responsibility */ }
+      }
+    });
     socket.on('error', () => {});
     socket.on('close', () => {
       // Acknowledgement only after the SDK's public close handler has run.
@@ -36,7 +51,7 @@ export async function resumeServer() {
   if (!address || typeof address === 'string') throw new Error('No resume listener');
   const snapshot = (): Wire => {
     if (failure) throw failure;
-    return { sessions: model.sessions.length, connections: records.length,
+    return { ...(rejection ? { receivedAcks: [...receivedAcks], closedModels: model.sessions.filter(session => session.closed).length } : {}), sessions: model.sessions.length, connections: records.length,
       contexts: JSON.parse(JSON.stringify(contexts)), emitted: [...emitted],
       closedConnections: records.flatMap((record, index) => record.closed ? [index + 1] : []) };
   };
@@ -56,6 +71,10 @@ export async function resumeServer() {
     await new Promise<void>(resolve => server.close(() => resolve()));
   })();
   async function handle(command: string, data: Wire): Promise<Wire> {
+    if (command === 'waitResumeAck' && rejection) {
+      if (!Number.isInteger(data.connection) || data.connection < 1 || data.connection > 3 || !Number.isInteger(data.upTo) || data.upTo < 0 || data.upTo > 0xffffffff) throw new Error('Invalid ACK receipt');
+      await wait(() => receivedAcks.some(ack => ack.connection === data.connection && ack.upTo === data.upTo)); return snapshot();
+    }
     if (command === 'emitResume') {
       if (!Array.isArray(data.markers) || data.markers.length < 1 || data.markers.length > 2 || data.markers.some((marker: unknown) => typeof marker !== 'string' || !/^[a-z-]{1,24}$/.test(marker)) || emitted.length + data.markers.length > 8) throw new Error('Invalid/bounded resume markers');
       for (const marker of data.markers as string[]) {
@@ -69,7 +88,7 @@ export async function resumeServer() {
       await wait(() => contexts.length >= data.count); return snapshot();
     }
     if (command === 'waitResumeClosed') {
-      if (!Number.isInteger(data.connection) || data.connection < 1 || data.connection > 2 || !records[data.connection - 1]) throw new Error('Unknown physical connection');
+      if (!Number.isInteger(data.connection) || data.connection < 1 || data.connection > (rejection ? 3 : 2) || !records[data.connection - 1]) throw new Error('Unknown physical connection');
       await records[data.connection - 1]!.done.promise; return snapshot();
     }
     if (command === 'finishResume') { await setImmediate(); return snapshot(); }

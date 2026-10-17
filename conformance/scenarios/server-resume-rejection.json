@@ -1,0 +1,6 @@
+[
+  {"profile":"server-resume-rejection-v1","id":"server/resume-rejection/unknown","expected":"Unknown session is rejected unbound with RESUME_FAILED seq 0 then close 4404, without a model"},
+  {"profile":"server-resume-rejection-v1","id":"server/resume-rejection/ahead","expected":"Cursor beyond sent history fails explicitly and closes the bound session"},
+  {"profile":"server-resume-rejection-v1","id":"server/resume-rejection/ack-history","expected":"With acknowledged-history discard policy, cursor below ACK boundary fails without partial replay"},
+  {"profile":"server-resume-rejection-v1","id":"server/resume-rejection/ack-boundary","expected":"Cursor equal to ACK boundary replays the full retained suffix with unchanged seq/content and remains usable"}
+]
