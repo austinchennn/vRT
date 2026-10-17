@@ -1,18 +1,24 @@
 import { defineAgent } from '@vrealtime/core';
 import { serve, type RunningServer } from '@vrealtime/server/node';
 import { fakeModel } from '@vrealtime/testing';
+import { heartbeatServer } from './server-heartbeat.js';
 import { streamServer } from './server-tool-stream.js';
 import { inputServer } from './server-input.js';
 import { control } from './control.js';
+let heartbeat: Awaited<ReturnType<typeof heartbeatServer>> | undefined;
 let stream: Awaited<ReturnType<typeof streamServer>> | undefined;
 let input: Awaited<ReturnType<typeof inputServer>> | undefined;
 let running: RunningServer | undefined;
-async function close(): Promise<void> { const current = running; running = undefined; await current?.close(); await stream?.close(); await input?.close(); }
+async function close(): Promise<void> { const current = running; running = undefined; await current?.close(); await stream?.close(); await heartbeat?.close(); await input?.close(); }
 control(async (command, data) => {
   if (command === 'ready') {
     if (data.profile === 'server-input-validation-v1') {
       input = await inputServer();
       return { url: input.url, driverCapabilities: ['server-input-validation-v1'] };
+    }
+    if (data.profile === 'server-heartbeat-v1') {
+      heartbeat = await heartbeatServer(data);
+      return { url: heartbeat.url, timing: heartbeat.timing, driverCapabilities: ['server-heartbeat-v1'] };
     }
     if (data.profile === 'server-tool-stream-v1') {
       if (typeof data.argumentStreaming !== 'boolean') throw new Error('Expected model argumentStreaming boolean');
@@ -29,6 +35,7 @@ control(async (command, data) => {
   }
   if (command === 'close') { await close(); return {}; }
   if (input) return input.handle(command);
+  if (heartbeat) return heartbeat.handle(command, data);
   if (stream) return stream.handle(command, data);
   throw new Error(`Unknown command ${command}`);
 }, close);

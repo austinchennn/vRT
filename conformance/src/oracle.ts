@@ -29,8 +29,8 @@ export class Oracle {
   baseline(direction: 'client' | 'server', messages: Wire[]): void {
     this.traffic(direction, messages, []);
   }
-  traffic(direction: 'client' | 'server', messages: Wire[], capabilities: readonly string[]): void {
-    let last = 0;
+  traffic(direction: 'client' | 'server', messages: Wire[], capabilities: readonly string[], initialSeq = 0): void {
+    let last = initialSeq;
     const seen = new Map<number, Wire>();
     const gated = new Set(this.registry.capabilities.filter((c: Wire) => !capabilities.includes(c.token)).flatMap((c: Wire) => c.messages?.[direction] ?? []));
     for (const message of messages) {

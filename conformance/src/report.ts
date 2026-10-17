@@ -4,7 +4,7 @@ export interface CaseResult {
   id: string; status: Status; durationMs: number;
   expected: string; actual: unknown; stage: string;
 }
-export type Profile = 'handshake-interrupt-v1' | 'tool-cancellation-v1' | 'server-auth-v1' | 'server-tool-stream-v1' | 'server-input-validation-v1';
+export type Profile = 'handshake-interrupt-v1' | 'tool-cancellation-v1' | 'server-auth-v1' | 'server-tool-stream-v1' | 'server-heartbeat-v1' | 'server-input-validation-v1';
 export interface Report {
   protocol: 1; profile: Profile; fullSuite: 'incomplete';
   mode: 'client' | 'server'; capabilities: string[];

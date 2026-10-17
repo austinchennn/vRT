@@ -100,6 +100,28 @@ Control replies do not substitute for wire evidence. After begin and finish, the
 
 Official instrumentation uses only public model events/clock, tool context, server configuration and lifecycle APIs. The cancelled case advances the public fake clock to deliver its scheduled response.end before late model events. No private queue/gate/state is read. Request IDs, stdout/stderr rules, monotonic deadlines and bounded direct-child shutdown remain unchanged. Drivers are trusted fixtures; this is not an arbitrary-work drain guarantee, process-tree supervision or rollback of effects.
 
+## Opt-in `server-heartbeat-v1` instrumentation
+
+This server-only profile requires explicit virtual-clock support. Its instrumentation token is separate from vRT capability negotiation. Each case owns a fresh process/clock starting at 0, no production credentials, dynamic loopback port, and at most two successive WebSocket connections. Foreign implementations may expose equivalent public edge/clock hooks; implementations without them are incomplete for this selected profile, not globally nonconformant.
+
+| Command | Data | Confirmation contract |
+|---|---|---|
+| `ready` | `{profile: "server-heartbeat-v1", timeoutMs: T, resumeWindowMs: 6T, holdOpening: boolean}` | Start fixture with these public server options. Return `{url, driverCapabilities: ["server-heartbeat-v1"], timing: {clock: "virtual", timeoutMs: T, delayAllowanceMs: ceil(T/2), resumeWindowMs: 6T}}`. T is a local integer policy, 100..60000. |
+| `waitHeartbeat` | `{connection: 1 or 2, event: "connected" or "opening" or "closed" or "audio" or "context:<marker>"}` | Await the named public observation for that connection, returning `{now}`. Connected means edge attachment/listeners installed; opening means the public auth hook entered; context/audio confirm actual SDK handling, not merely socket receipt. Markers use lowercase letters/digits/hyphens. No new wire probe. |
+| `releaseHeartbeatOpening` | `{}` | Resolve the owned auth barrier; drain its immediate continuations. Runner still independently waits for wire ready. Repeat release is harmless. |
+| `advanceHeartbeat` | `{ms: integer}` | Advance only the injected clock. Each step <=2T, total <=resumeWindow+3T. Drain close handshakes initiated by this advance, then return `{now, connections: [{open: boolean, closeRequestedAt?: number}]}` in attachment order. `open` is the public WebSocket state; closeRequestedAt observes the public outbound close request, not private timeout state. |
+| `close` | `{}` | Idempotently close sockets, release held hook, drain owned continuations, close Hub/model, cancel owned clock resources and listener. EOF repeats cleanup. |
+
+Virtual time does not advance autonomously. Runner real deadlines independently bound control and network waits, including a driver clock that hangs. A clock acknowledgement must match the requested target; receipt acknowledgements must match current virtual time. No clock commands are sent until a connection/receipt barrier or actual wire response establishes the relevant input has been handled.
+
+The runner independently records received-input times and checks early liveness/late closure with a finite allowance. It never asks for SDK lastSeen, session maps, private timers or a computed heartbeat verdict. Time/counters from instrumentation are trusted evidence; actual pong/ready/error/close and minimal resume still travel over real WebSockets.
+
+The official fixture uses public Hub.attach rather than adding an inspection API to serve(). It converts real text/binary socket data into public Connection.receive calls and records transport events around attachment/close. The public Clock adapter owns its scheduled handles only for cleanup. The fake model exposes sendAudio receipt without a sound device. The optional opening hook accepts a fixed test principal; this is not production authentication.
+
+For minimal resume the client application stream is empty, so resumedFrom must be 0; resumeFrom uses the latest independently observed server cursor. The probe runs before the configured resume window expires. Connection parking/retention is established by successful same-session wire ready, not Hub.size or private lookups. There is no automatic client reconnect or replay orchestration claim.
+
+Missing instrumentation/virtual clock is incomplete/nonzero; mismatched configuration/clock replies fail the driver contract. Malformed output, exit, deadline and bounded direct-child shutdown rules from revision 1 continue to apply. WebSocket control Ping/Pong activity remains an explicitly untested specification interpretation; vRT ping/pong are JSON messages here.
+
 ## Ownership and completeness
 
 The driver owns its SDK, listeners, application tasks, timers and any child resources. It must report errors rather than fabricate success. The official drivers run directly as Node processes; foreign drivers can be Python, Java, C or another implementation with this contract. No Python network SDK is included in this phase.
