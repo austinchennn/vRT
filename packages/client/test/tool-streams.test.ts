@@ -98,6 +98,32 @@ describe('tool streams in a session', () => {
     expect(events.filter((e) => e.type !== 'tool.preview').map((e) => (e.type === 'tool.stream' ? `${e.callId}:${e.phase}` : e.type))).toEqual(['c1:start', 'c1:arguments-delta', 'c1:cancelled', 'interrupted']);
   });
 
+  for (const action of ['interrupt', 'close'] as const) {
+    it.each(['arguments-delta', 'progress'] as const)(`does not emit a derived %s preview after a stream listener calls ${action}()`, async (phase) => {
+      const { session, socket, events, send } = await start([TOOL_STREAM_V1]);
+      let closing: Promise<void> | undefined;
+      try {
+        socket.server({ type: 'turn.state', turnId: 'turn-1', epoch: 1, state: 'acting' });
+        send(step('c1', 1, { phase: 'start' }) as never);
+        if (phase === 'progress') send(step('c1', 1, { phase: 'arguments-complete', arguments: {} }) as never);
+        session.on('tool.stream', (event) => {
+          if (event.phase !== phase) return;
+          if (action === 'interrupt') session.interrupt();
+          else closing = session.close();
+        });
+        send(step('c1', 1, phase === 'progress' ? { phase, progress: { done: 1 } } : { phase, delta: '{' }) as never);
+        await closing;
+        expect(events.filter((event) => event.type === 'tool.preview')).toEqual([]);
+        expect(events.filter((event) => event.type === 'tool.stream').map((event) => event.phase)).toEqual([
+          'start', ...(phase === 'progress' ? ['arguments-complete'] : []), phase, ...(action === 'interrupt' ? ['cancelled'] : []),
+        ]);
+        expect(events.filter((event) => event.type === 'interrupted')).toHaveLength(action === 'interrupt' ? 1 : 0);
+      } finally {
+        await session.close();
+      }
+    });
+  }
+
   it('ignores tool.stream when the server did not confirm the capability', async () => {
     const { session, events, send } = await start(undefined);
     expect(session.capabilities.size).toBe(0);
