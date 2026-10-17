@@ -1,6 +1,6 @@
-# vRT black-box conformance: first-phase profile
+# vRT black-box conformance profiles
 
-This is the **partial** `handshake-interrupt-v1` profile for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
+These are **partial** `handshake-interrupt-v1` and `tool-cancellation-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
 
 ## Run from a checkout
 
@@ -10,6 +10,7 @@ Requires Node 22+ and a clean `npm ci` at the repository root:
 npm run test:conformance
 node conformance/dist/node/cli.js client --exec node --json -- conformance/dist/node/drivers/typescript-client.js
 node conformance/dist/node/cli.js server --exec node --json -- conformance/dist/node/drivers/typescript-server.js
+node conformance/dist/node/cli.js client --profile tool-cancellation-v1 --exec node --json -- conformance/dist/node/drivers/typescript-client.js
 ```
 
 `--exec` is a single executable; everything after `--` is passed as its argument array without a shell. The runner starts a new process/session for each case. Client mode starts a test server on an OS-assigned loopback port and passes `VRT_CONFORMANCE_URL` to the driver. Server mode gets its URL from the driver's `ready` response. For a server already running, use:
@@ -24,12 +25,16 @@ Use a test server that accepts the baseline anonymous `hello`; authentication pr
 
 ## Coverage and evidence
 
+The default remains `handshake-interrupt-v1`; it never silently adds requirements to an existing driver. `--profile tool-cancellation-v1` is client-only and selects the two additional cases below. The driver must advertise the **instrumentation** token in `ready.driverCapabilities`; this is separate from vRT wire capabilities (`ready.capabilities`, still empty in these profiles). Missing support reports incomplete and exits 1; unknown profiles or server/cancellation invocations are usage errors (exit 2).
+
 | Stable case ID | Assertion |
 |---|---|
 | `client/handshake/baseline` | Schema-valid hello, ready without confirmed capabilities, public SDK capabilities empty, no gated wire messages through close. |
 | `client/interrupt/stale-call` | After observing epoch 1 and completing local interrupt, an old-epoch probe never starts/commits and has exactly one logical INTERRUPTED result with matching call/epoch. |
 | `server/handshake/baseline` | Minimal hello without capabilities receives schema-valid ready with no capabilities enabled. |
 | `server/handshake/version` | Wrong-major hello gets recoverable sessionless UNSUPPORTED_VERSION without opening a session; valid hello on the same connection then succeeds (§9.1). |
+| `client/cancellation/queued-running` | A runs and blocks; B is observed queued; local interrupt aborts A; C arrives closed; release A successfully; each result is INTERRUPTED once through close. |
+| `client/cancellation/late-rejection` | Same sequence, but A's application task throws after release; its rejection cannot create a second logical result. |
 
 The baseline hello and wrong major value are loaded from shared vector IDs (`client/hello/minimal`, `client/envelope/version-2`). Packaged schemas validate incoming frames; the independent oracle handles contiguous new sequence numbers, same-sequence replay and logical result uniqueness. The capability registry identifies gated message types. No SDK codec, Inbox/Outbox or epoch gate is used as an oracle.
 
@@ -37,9 +42,13 @@ This profile does not inject a server `interrupted` message into the client test
 
 **End fence:** `finish` waits for the call's public result event, drains application-owned work, initiates normal close and waits for the SDK's public closed event. The runner waits for the WebSocket close event and examines the entire received trace before judging. Correctly implemented drivers must not leave scenario work queued beyond this fence. This is a finite test contract, not proof against an arbitrary malicious driver or arbitrary future delayed work. Same-sequence retransmission is not a second logical result; two result messages with different sequences are.
 
+In the cancellation profile, A/B/C have independent received/started/committed/aborted/completed observations. Before interrupt the oracle requires A started and blocked, B received but unstarted, and no commits. It then confirms A's AbortSignal, C receipt, releases A, drains the application task and SDK promise continuations via an event-loop fence, and checks all three results only after close. A's commit check is **cooperative application behavior**, not proof the SDK can undo prior effects. B/C must never enter the tool at all.
+
+§7.2 permits an SDK to defer A's INTERRUPTED result until A finishes. The runner therefore does not wait for that result before releasing A. A separate deferred-result wire fixture must pass; the late-success and late-rejection official SDK cases test suppression when it settles early. Fault fixtures that start B during cancellation or send a new-seq A result after release fail at the new case IDs. Same-seq retransmission after release still passes. Held release, premature exit and held finish tests verify bounded failure and vanished child PIDs. Repeated close after finish remains idempotent.
+
 Tests include a stale-executing client (returns INTERRUPTED but increments effects), a double-result client, a duplicate deferred to a later event-loop callback, and a same-sequence replay that must pass. Failure handling covers no response, process exit, malformed/oversized stdout, a refused handshake, stalled hello and forced termination. Cleanup tests verify that the spawned PIDs no longer exist. Driver shutdown is idempotent after a successful finish.
 
-Not implemented: complete message-vector conformance, reconnect/replay scenarios, ACK bounds, heartbeat, audio, queued/running cancellation, server interruption routing, capability-enabled scenarios and Python/network drivers. A bare server URL cannot establish tool-internal effects; only the listed handshake cases run in server mode.
+Not implemented: complete message-vector conformance, reconnect/replay scenarios, ACK bounds, heartbeat, audio, server interruption routing, capability-enabled scenarios and Python/network drivers. A bare server URL cannot establish tool-internal effects; only the listed handshake cases run in server mode.
 
 ## Build, install and packaging
 
@@ -50,7 +59,7 @@ npm run pack:conformance
 npm run test:conformance:consumer
 ```
 
-The consumer check packs and installs the actual tarball into an unrelated temporary directory, then invokes its installed `vrt-conformance` executable for both reference modes. It requires registry access or a populated npm cache for existing runtime dependencies. The package is marked private to prevent accidental registry publication; `npm pack` and local installation still work. Package-name availability and public release are not claimed.
+The consumer check packs and installs the actual tarball into an unrelated temporary directory, then invokes its installed `vrt-conformance` executable for both original reference modes and the cancellation profile. It requires registry access or a populated npm cache for existing runtime dependencies. The package is marked private to prevent accidental registry publication; `npm pack` and local installation still work. Package-name availability and public release are not claimed.
 
 Build copies current schema, shared vectors, capability registry and scenarios into `dist/assets` and includes LICENSE. Installed CLI asset paths are relative to the executable, never the checkout/current directory. Official reference drivers are bundled from the locally built SDK; they therefore test that build, not whichever SDK an external user happens to have installed. To test a different implementation, supply its own executable following [driver-protocol.md](driver-protocol.md).
 

@@ -4,9 +4,10 @@ export interface CaseResult {
   id: string; status: Status; durationMs: number;
   expected: string; actual: unknown; stage: string;
 }
+export type Profile = 'handshake-interrupt-v1' | 'tool-cancellation-v1';
 export interface Report {
-  protocol: 1; profile: 'handshake-interrupt-v1'; fullSuite: 'incomplete';
+  protocol: 1; profile: Profile; fullSuite: 'incomplete';
   mode: 'client' | 'server'; capabilities: string[];
   cases: CaseResult[]; remaining: string[];
 }
-export interface Scenario { id: string; expected: string }
+export interface Scenario { profile?: Profile; id: string; expected: string }

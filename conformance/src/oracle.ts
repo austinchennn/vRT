@@ -41,6 +41,30 @@ export class Oracle {
     }
   }
   interrupted(messages: Wire[], effects: Wire, callId: string, epoch: number): void {
+    this.#interruptedResult(messages, callId, epoch);
+    if (effects.started !== 0 || effects.committed !== 0) {
+      throw new Error(`Old-epoch tool took effect: ${JSON.stringify(effects)}`);
+    }
+  }
+  queued(effects: Wire, ids: string[]): void {
+    const [a, b, c] = ids.map(id => effects.calls?.[id]);
+    if (!a?.received || a.started !== 1 || a.completed !== 0 || a.committed !== 0 || a.aborted !== false ||
+        !b?.received || b.started !== 0 || b.committed !== 0 ||
+        c?.started !== 0 || c?.committed !== 0) {
+      throw new Error(`Expected A blocked and B received but queued: ${JSON.stringify(effects)}`);
+    }
+  }
+  cancelled(messages: Wire[], effects: Wire, ids: string[], epoch: number): void {
+    for (const [index, id] of ids.entries()) {
+      this.#interruptedResult(messages, id, epoch);
+      const call = effects.calls?.[id];
+      if (!call || call.started !== (index === 0 ? 1 : 0) || call.committed !== 0 ||
+          call.completed !== (index === 0 ? 1 : 0) || (index === 0 && call.aborted !== true)) {
+        throw new Error(`Cancellation effects failed for ${id}: ${JSON.stringify(call)}`);
+      }
+    }
+  }
+  #interruptedResult(messages: Wire[], callId: string, epoch: number): void {
     const results = messages.filter(m => m.type === 'tool.result' && m.callId === callId);
     const logical = new Map<number, Wire>();
     for (const result of results) {
@@ -52,9 +76,6 @@ export class Oracle {
     const result = [...logical.values()][0]!;
     if (result.epoch !== epoch || result.ok !== false || result.code !== 'INTERRUPTED') {
       throw new Error(`Expected INTERRUPTED for epoch ${epoch}: ${JSON.stringify(result)}`);
-    }
-    if (effects.started !== 0 || effects.committed !== 0) {
-      throw new Error(`Old-epoch tool took effect: ${JSON.stringify(effects)}`);
     }
   }
 }

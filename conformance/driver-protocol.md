@@ -34,6 +34,28 @@ Probe increments started immediately on entry, committed at its synchronous test
 
 The runner sends turn.state, waits for observe, requests interrupt, verifies its wire interrupt, then sends stale tool.call. It sends no server interrupted echo. The control channel alone is insufficient evidence: the runner checks actual vRT wire traffic plus final observable effects through WebSocket close.
 
+## Optional tool-cancellation-v1 instrumentation
+
+Revision 1 has an additive optional extension. `ready` may include `driverCapabilities: ["tool-cancellation-v1"]`. This is test-driver instrumentation, **not** a vRT capability and never appears in hello/ready wire negotiation. The original profile and commands remain usable without this field. A cancellation-profile runner checks it before issuing new commands; missing support produces incomplete, not pass or a forced upgrade of legacy drivers.
+
+The probe's original synchronous behavior is unchanged unless explicitly prepared:
+
+| Command | Data | Confirmation contract |
+|---|---|---|
+| `prepareCancellation` | `{callIds: [A,B,C], blockedCallId: A}` | Initialize per-call effects before any calls arrive; A will wait on an application-owned deferred task. |
+| `waitForCall` | `{callId, phase: "received" \| "started" \| "aborted"}` | Await the SDK's public call event, probe entry, or A's actual cancellation signal respectively. No private SDK queue inspection. |
+| `releaseCall` | `{callId: A, outcome: "resolve" \| "reject"}` | Release the prepared task once; await its completion/rejection and attached SDK promise continuations via an event-loop fence. No time-based sleep. |
+| `readEffects` | `{}` | Original aggregate fields plus `calls: {[callId]: {received, started, committed, aborted, completed}}`. |
+| `finish` | `{callIds: [A,B,C]}` | Await public results for all calls, drain all owned tasks/continuations, close normally and await closed; return final aggregate and per-call effects. Legacy `{callId}`/`{}` forms remain supported. |
+
+`received` and `aborted` are booleans; other per-call fields are counters. `started` increments immediately on probe entry, before any cancellation check. A registers the supplied AbortSignal, waits for explicit release, then checks the signal before committing. Its finally block increments completed even on rejection. B/C are normal synchronous probes: if wrongly entered they increment started/committed, exposing a failed SDK gate rather than hiding it through a second application cancellation check.
+
+Sequence: observe epoch → send A → wait started → send B → wait received → inspect blocked/queued effects → local interrupt confirmation → wait A aborted → send C → wait received → release A → finish → wire close → oracle. B's receive event is not itself a queue-depth API: A is deliberately held, and independent start counters show B has not entered. Returning from release must not hide task rejection or leave application work queued beyond finish.
+
+A running call may send INTERRUPTED immediately **or after completion** (§7.2). The runner must release A without waiting for its result, then require exactly one logical INTERRUPTED result. A fake wire driver with deferred settlement proves this allowed behavior is not rejected. If a released task rejects, all instrumentation drain handlers must observe the rejection so it does not escape as an unhandled process error.
+
+`close` must remain idempotent and release owned blocked work after closing/aborting the SDK during cleanup. If a command cannot complete, the runner retains its existing bounded direct-child termination policy. These fixtures do not promise forced cancellation, rollback, process-tree supervision or protection against dishonest effect reporting.
+
 ## Server driver
 
 `ready {}` starts an anonymous test server with deterministic model fixture and returns `{url: "ws://127.0.0.1:<dynamic-port>"}`. No startup URL is printed separately. `close {}` is idempotent and releases server/session resources. stdin EOF must also clean up.

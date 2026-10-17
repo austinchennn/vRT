@@ -1,4 +1,5 @@
-import type { CaseResult, Report, Wire } from '../report.js';
+import type { CaseResult, Profile, Report, Wire } from '../report.js';
+import { cancellation, CANCELLATION_CASES, IncompleteDriver } from './cancellation.js';
 import { assets } from './assets.js';
 import { until } from './deadline.js';
 import { ProcessDriver } from './process-driver.js';
@@ -6,19 +7,23 @@ import { dial, listen, type Peer } from './ws-peer.js';
 
 export interface Options {
   mode: 'client' | 'server'; command?: string; args: string[];
-  url?: string; timeoutMs: number; assets: string;
+  url?: string; profile?: Profile; timeoutMs: number; assets: string;
 }
 const PCM = { encoding: 'pcm16', sampleRate: 24000 };
 const CALL = 'conformance-call';
 const EPOCH = 1;
 export async function run(options: Options): Promise<Report> {
   const { oracle, scenarios, hello: baselineHello, wrongVersion } = assets(options.assets);
+  const profile = options.profile ?? 'handshake-interrupt-v1';
+  if (profile === 'tool-cancellation-v1' && options.mode !== 'client') throw new Error('tool-cancellation-v1 only supports client mode');
   const report: Report = {
-    protocol: 1, profile: 'handshake-interrupt-v1', fullSuite: 'incomplete', mode: options.mode,
+    protocol: 1, profile, fullSuite: 'incomplete', mode: options.mode,
     capabilities: [], cases: [], remaining: ['resume/replay', 'heartbeat', 'audio', 'queued/running cancellation', 'optional capabilities', 'server interruption routing'],
   };
-  const selected = scenarios.filter(s => s.id.startsWith(options.mode + '/'));
-  const required = options.mode === 'client'
+  const selected = scenarios.filter(s => (s.profile ?? 'handshake-interrupt-v1') === profile && s.id.startsWith(options.mode + '/'));
+  if (profile === 'tool-cancellation-v1') report.remaining = ['handshake/old-epoch baseline (separate profile)', ...report.remaining.filter(item => item !== 'queued/running cancellation')];
+  else report.remaining = report.remaining.map(item => item === 'queued/running cancellation' ? item + ' (separate profile)' : item);
+  const required = profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
     ? ['client/handshake/baseline', 'client/interrupt/stale-call']
     : ['server/handshake/baseline', 'server/handshake/version'];
   for (const id of required) {
@@ -27,7 +32,7 @@ export async function run(options: Options): Promise<Report> {
     if (definitions.length === 0) report.cases.push({ id, status: 'incomplete', durationMs: 0, expected: 'Required profile scenario present', actual: 'Missing scenario definition', stage: 'inventory' });
   }
   for (const scenario of selected) {
-    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version'].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
+    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...CANCELLATION_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
     const start = performance.now(); const end = start + options.timeoutMs;
     let stage = 'setup';
     const result: CaseResult = { ...scenario, status: 'fail', durationMs: 0, actual: null, stage };
@@ -52,7 +57,9 @@ export async function run(options: Options): Promise<Report> {
         stage = 'ready';
         const info = await ready;
         if (!Array.isArray(info.capabilities) || info.capabilities.length !== 0) throw new Error('Baseline negotiated capabilities must be empty');
-        if (scenario.id === 'client/interrupt/stale-call') {
+        if (profile === 'tool-cancellation-v1') {
+          result.actual = await cancellation(peer, driver, oracle, info, end, scenario.id.endsWith('late-rejection'), value => { stage = value; });
+        } else if (scenario.id === 'client/interrupt/stale-call') {
           peer.send({ v: 1, seq: 1, type: 'turn.state', turnId: 'conformance-turn', epoch: EPOCH, state: 'thinking' });
           stage = 'observe epoch'; await driver.request('observe', { epoch: EPOCH }, end);
           stage = 'local interrupt'; await driver.request('interrupt', {}, end);
@@ -97,7 +104,7 @@ export async function run(options: Options): Promise<Report> {
         result.actual = { ready: true, versionRejected: invalid, capabilities: [] };
       }
       result.status = 'pass';
-    } catch (error) { result.actual = { error: error instanceof Error ? error.message : String(error), trace: peer?.messages ?? [] }; }
+    } catch (error) { if (error instanceof IncompleteDriver) result.status = 'incomplete'; result.actual = { error: error instanceof Error ? error.message : String(error), trace: peer?.messages ?? [] }; }
     finally {
       // Stop untrusted processes even when their protocol is broken, then close sockets.
       const cleanup = await Promise.allSettled([driver?.stop(), peer?.dispose()]);
