@@ -3,6 +3,8 @@ import { cancellation, CANCELLATION_CASES, IncompleteDriver } from './cancellati
 import { authCredentials, authenticateScenario, AUTH_CASES, AUTH_PROFILE, IncompleteAuthDriver } from './auth.js';
 import { serverToolStream, STREAM_CASES, STREAM_PROFILE, IncompleteStream } from './server-tool-stream.js';
 import { serverHeartbeat, HEARTBEAT_CASES, HEARTBEAT_PROFILE, IncompleteHeartbeat } from './server-heartbeat.js';
+import { RESUME_PROFILE, RESUME_CASES, IncompleteResume } from '../resume-oracle.js';
+import { serverResume, ResumeFailure } from './server-resume.js';
 import { assets } from './assets.js';
 import { until } from './deadline.js';
 import { ProcessDriver } from './process-driver.js';
@@ -22,6 +24,7 @@ export async function run(options: Options): Promise<Report> {
   if (profile === AUTH_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-auth-v1 requires server mode and --exec');
   if (profile === STREAM_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-tool-stream-v1 requires server mode and --exec');
   if (profile === HEARTBEAT_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-heartbeat-v1 requires server mode and --exec');
+  if (profile === RESUME_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-resume-replay-v1 requires server mode and --exec');
   const heartbeatTimeout = options.heartbeatTimeoutMs ?? 1200;
   if (profile === HEARTBEAT_PROFILE && (!Number.isInteger(heartbeatTimeout) || heartbeatTimeout < 100 || heartbeatTimeout > 60000)) throw new Error('Invalid local heartbeat timeout policy');
   const settings = { timeoutMs: heartbeatTimeout, delayAllowanceMs: Math.ceil(heartbeatTimeout / 2), resumeWindowMs: heartbeatTimeout * 6 };
@@ -35,7 +38,8 @@ export async function run(options: Options): Promise<Report> {
   if (profile === AUTH_PROFILE) report.remaining.unshift('handshake/interrupt baseline (separate profile)', 'resume principal isolation');
   if (profile === STREAM_PROFILE) report.remaining.unshift('handshake/auth/cancellation (separate profiles)', 'client tool-stream observations', 'additional capability matrices');
   if (profile === HEARTBEAT_PROFILE) report.remaining = ['client heartbeat SHOULD behavior', 'other profiles (separately selected)', 'full bidirectional resume/replay', 'binary/audio exception matrices', 'WebSocket control-frame timing interpretation', 'Python network driver'];
-  const required = profile === HEARTBEAT_PROFILE ? HEARTBEAT_CASES : profile === STREAM_PROFILE ? STREAM_CASES : profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
+  if (profile === RESUME_PROFILE) report.remaining = ['other profiles (selected separately)', 'client automatic/bidirectional recovery', 'ACK-deleted/evicted history', 'resume expiry/principal isolation', 'lost tool results', 'heartbeat/binary/audio', 'Python driver'];
+  const required = profile === RESUME_PROFILE ? RESUME_CASES : profile === HEARTBEAT_PROFILE ? HEARTBEAT_CASES : profile === STREAM_PROFILE ? STREAM_CASES : profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
     ? ['client/handshake/baseline', 'client/interrupt/stale-call']
     : ['server/handshake/baseline', 'server/handshake/version'];
   for (const id of required) {
@@ -44,7 +48,7 @@ export async function run(options: Options): Promise<Report> {
     if (definitions.length === 0) report.cases.push({ id, status: 'incomplete', durationMs: 0, expected: 'Required profile scenario present', actual: 'Missing scenario definition', stage: 'inventory' });
   }
   for (const scenario of selected) {
-    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES, ...STREAM_CASES, ...HEARTBEAT_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
+    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES, ...STREAM_CASES, ...HEARTBEAT_CASES, ...RESUME_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
     const start = performance.now(); const end = start + options.timeoutMs;
     let stage = 'setup';
     const credentials = profile === AUTH_PROFILE ? authCredentials() : undefined;
@@ -99,6 +103,7 @@ export async function run(options: Options): Promise<Report> {
           if (credentials) readyData = { profile: AUTH_PROFILE, authToken: credentials.token };
           else if (profile === STREAM_PROFILE) readyData = { profile, argumentStreaming: !scenario.id.endsWith('no-delta') };
           else if (profile === HEARTBEAT_PROFILE) readyData = { profile, timeoutMs: settings.timeoutMs, resumeWindowMs: settings.resumeWindowMs, holdOpening: scenario.id.endsWith('pong-opening') };
+          else if (profile === RESUME_PROFILE) readyData = { profile };
           stage = 'server ready'; const info = await driver.request('ready', readyData, end);
           if (credentials && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.includes(AUTH_PROFILE))) throw new IncompleteAuthDriver('Driver does not advertise server-auth-v1 instrumentation');
           if (profile === STREAM_PROFILE && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.every((token: unknown) => typeof token === 'string') || !info.driverCapabilities.includes(STREAM_PROFILE))) throw new IncompleteStream('Driver lacks server-tool-stream-v1 instrumentation');
@@ -106,12 +111,15 @@ export async function run(options: Options): Promise<Report> {
             if (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.includes(HEARTBEAT_PROFILE) || info.timing?.clock !== 'virtual') throw new IncompleteHeartbeat('Driver lacks virtual server-heartbeat-v1 instrumentation');
             if (Object.entries(settings).some(([key, value]) => info.timing[key] !== value)) throw new Error('Driver timing configuration mismatch');
           }
+          if (profile === RESUME_PROFILE && (!Array.isArray(info.driverCapabilities) || !info.driverCapabilities.every((token: unknown) => typeof token === 'string') || !info.driverCapabilities.includes(RESUME_PROFILE))) throw new IncompleteResume('Driver lacks server-resume-replay-v1 instrumentation');
           url = info.url;
         }
         if (typeof url !== 'string' || !/^wss?:\/\//.test(url)) throw new Error('Server mode needs --url or driver ready.url');
         if (credentials && (url.includes(credentials.token) || url.includes(credentials.wrongToken))) throw new Error('Driver URL must not contain a test credential');
         peer = await dial(url, end);
-        if (profile === HEARTBEAT_PROFILE) {
+        if (profile === RESUME_PROFILE) {
+          result.actual = await serverResume(scenario.id, peer, url, driver!, oracle, baselineHello, end, value => { stage = value; });
+        } else if (profile === HEARTBEAT_PROFILE) {
           result.actual = await serverHeartbeat(scenario.id, peer, extraPeers, driver!, oracle, baselineHello, url, settings, end, value => { stage = value; }, heartbeatEvidence);
         } else if (profile === STREAM_PROFILE) {
           const actual = await serverToolStream(scenario.id, peer, driver!, oracle, baselineHello, end, value => { stage = value; });
@@ -141,8 +149,8 @@ export async function run(options: Options): Promise<Report> {
       }
       result.status = 'pass';
     } catch (error) {
-      if (error instanceof IncompleteHeartbeat || error instanceof IncompleteStream || error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
-      result.actual = { error: error instanceof Error ? error.message : String(error), trace: peer?.messages ?? [], close: peer?.closeInfo, ...(profile === HEARTBEAT_PROFILE ? { heartbeat: heartbeatEvidence } : {}) };
+      if (error instanceof IncompleteResume || error instanceof IncompleteHeartbeat || error instanceof IncompleteStream || error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
+      result.actual = { error: error instanceof Error ? error.message : String(error), trace: peer?.messages ?? [], close: peer?.closeInfo, ...(error instanceof ResumeFailure ? { connections: error.connections } : {}), ...(profile === HEARTBEAT_PROFILE ? { heartbeat: heartbeatEvidence } : {}) };
     }
     finally {
       // Stop untrusted processes even when their protocol is broken, then close sockets.

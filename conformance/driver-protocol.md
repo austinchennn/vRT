@@ -127,3 +127,23 @@ Missing instrumentation/virtual clock is incomplete/nonzero; mismatched configur
 The driver owns its SDK, listeners, application tasks, timers and any child resources. It must report errors rather than fabricate success. The official drivers run directly as Node processes; foreign drivers can be Python, Java, C or another implementation with this contract. No Python network SDK is included in this phase.
 
 The runner cannot prove a dishonest driver accurately reports effects or has drained arbitrary future work. Review external drivers as trusted instrumentation, and report unsupported operations as incomplete/failure rather than pretending the implementation passed. This contract does not provide full session conformance or certification.
+
+
+## Opt-in `server-resume-replay-v1` instrumentation
+
+This server-only test profile is not a wire capability. Each case owns one anonymous inert model, up to two real WebSocket connections and a fresh process. Old ready/finish operations and other profiles retain their meaning. All commands use the existing requestId, stdout/stderr, error, EOF and bounded direct-child termination rules.
+
+| Command | Data | Confirmation |
+|---|---|---|
+| `ready` | `{profile:"server-resume-replay-v1"}` | Start an OS-assigned loopback listener around the public server SDK and an inert model (no scripts, tools or background producers). Return `{url,driverCapabilities:["server-resume-replay-v1"]}` only when listening. |
+| `waitResumeContext` | `{count:1 or 2}` | Await that many public onContext callbacks; return complete bounded snapshot, including duplicates if incorrectly delivered. Do not deduplicate in the instrumentation. |
+| `emitResume` | `{markers:string[]}` | One/two markers per request. Emit each through the public model as input.transcript with itemId=`resume-<marker>`, text=marker, final=true; acknowledge only after synchronous injection, with snapshot. Never generate wire seq/frames in the official driver. |
+| `waitResumeClosed` | `{connection:1 or 2}` | Physical connection number in acceptance order. Acknowledge only after its public WebSocket close callback has delivered Connection.closed() to the SDK; return snapshot. |
+| `finishResume` | `{}` | Drain the controlled model/context continuations, return final snapshot; do not invent extra model events or end the session to excuse missing replay. Runner has already closed both physical peers and confirmed their SDK callbacks. |
+| `close` | `{}` | Idempotently terminate remaining physical peers, await public close delivery, close SDK Hub/model/listener and clear owned resources. Repeat/EOF safe. |
+
+Snapshot: `{sessions,connections,contexts:JSON[],emitted:string[],closedConnections:number[]}`. sessions is the public model's total connection count (including closed model sessions), not merely currently active sessions. contexts contains actual callback values in order. emitted records injections, never their desired wire results. closedConnections lists physically closed/SDK-notified acceptance IDs in acceptance order. Missing fields fail; count bounds are two connections, eight contexts (each at most 1024 JSON characters) and eight markers (1–24 lowercase ASCII/hyphen characters). Overflow fails rather than hiding data. Wire/control buffers retain their existing limits.
+
+The public edge confirmation does not inspect parked state. Application cursor is separate from bytes captured by transport: the from-zero case deliberately leaves application processing at 0 and sends no ACK. Other cases process the captured prefix. Context seq-1 replay exercises server dedup; seq 2 proves continued handling. This contract is server instrumentation for a raw test client, not a Python/Java/C reconnect implementation.
+
+The official driver uses normal public Hub defaults with no virtual time control. Its injections/context callbacks are synchronous and have no producers left scheduled; finish drains attached continuations. Deadlines are local bounded test policy, not protocol latency requirements. Driver effects/drain confirmations are trusted, not dishonest-driver detection, process-tree supervision or general guarantees about arbitrary asynchronous work.

@@ -1,6 +1,6 @@
 # vRT black-box conformance profiles
 
-These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1`, `server-auth-v1`, `server-tool-stream-v1` and `server-heartbeat-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
+These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1`, `server-auth-v1`, `server-tool-stream-v1`, `server-heartbeat-v1` and `server-resume-replay-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
 
 ## Run from a checkout
 
@@ -149,3 +149,31 @@ The root workspace includes this package, but production `scripts/packages.mjs` 
 - Drivers are trusted test instrumentation. The runner bounds its own incoming WebSocket payload (64 KiB), frame trace (256), JSONL buffer (64 KiB), stderr tail (8 KiB), waits and direct-child termination. It is not an OS sandbox; an external driver must own/clean up any descendants it spawns. Shipped drivers spawn no descendants.
 - Public SDK events plus driver effects provide evidence under the documented fence, not introspection into private SDK state. An implementation that cannot expose equivalent driver operations needs an explicit incomplete profile, not invented success.
 - The small phase-1 scenario inventory selects fixed implementations rather than exposing a general-purpose workflow language. Adding scenarios requires explicit runner support and independent oracle review.
+
+
+## Server normal-resume profile
+
+```sh
+node conformance/dist/node/cli.js server --profile server-resume-replay-v1 --exec node --json -- conformance/dist/node/drivers/typescript-server.js
+```
+
+An explicit server/driver profile for §§4.1–4.3 and 5.1–5.4, using a controllable raw client. It does **not** implement or certify the official client's automatic reconnect or full bidirectional recovery. No optional wire capability, model key, clock manipulation or device is needed. Missing/malformed instrumentation is incomplete/nonzero; missing observations fail. Other profile/default commands retain their meaning.
+
+| Stable case ID | Assertions |
+|---|---|
+| `server/resume/suffix` | Application processes prefix, disconnects without ACK, two model transcripts are produced offline, same session resumes with the full ordered suffix and client receive cursor. |
+| `server/resume/from-zero` | Transport captures prefix but application processing cursor stays 0; all retained prefix/offline messages replay with original content/seq. |
+| `server/resume/caught-up` | Already-current cursor yields empty suffix; a new model marker follows at the next seq, checking the whole trace instead of waiting for silence. |
+| `server/resume/replace` | New connection resumes an active session, old connection closes 4000; subsequent model marker arrives on new peer only. |
+
+Every case sends context seq 1 before reconnect. Public onContext confirms processing; resumed ready must report resumedFrom 1. Sending context seq 1 again, followed by seq 2 with different data, yields exactly the two original context values, with one model connection across both sockets. Context revision/tag fields are application test data, not new protocol fields or instructions. Server outputs are intentionally never ACKed to exercise retention; the test client deliberately withholds the receiver's recommended ACK behavior.
+
+The official driver uses **public Hub.attach** behind an ordinary WebSocket edge, public Connection.receive/closed, onContext and fakeModel events/sessions. This is the server SDK under test, not handcrafted expected frames. The edge's close confirmation happens after Connection.closed() returns, without inspecting private parked/session/inbox/outbox state. Shutdown terminates physical peers, delivers those close callbacks, then closes the Hub so parked expiry/heartbeat timers are cleared. It uses normal public SDK time defaults and tests no timeout policy.
+
+The runner owns the second peer and disposes it in finally on every path; its normal cleanup separately owns the first peer/driver. Failure reports include both captured connection traces/close information when available. Wire trace/schema/capability/sequence checks operate on the combined session history, so a resumed suffix need not start at seq 1. Semantic checks independently require the entire requested suffix, original retained-message contents and expected offline markers with continuous numbering. Identical same-seq replay is one logical message; changed same-seq content fails. Each connection receives its own new ready; old transient ready is not replayed. Negotiated formats/capabilities stay unchanged (explicit/default PCM sample rate is normalized).
+
+A prefix model marker and ordered pong establish the captured prefix; only the selected application cursor is sent as resumeFrom. The original physical close and SDK close confirmation precede offline model injection. After resume, context confirmation plus a new public model marker and live pong fence precede second-peer close, SDK close confirmation and finish. The final marker exposes missing last/intermediate cached messages; neither ready nor the first replay nor a quiet interval is considered completion. Pongs alone do not prove arbitrary asynchronous work drained. This deterministic instrumentation has only synchronous model injections/context observations and no scripts/tools/background producers.
+
+Real-wire faults cover missing middle/last messages, changed content/seq, wrong resumedFrom, replacement session/model, duplicate context effects, missing/wrong old close, replayed transient ready, conflicting replay and missing observations. Correct independent servers and identical same-seq replay pass. Held close/context/finish/replay, startup/no response, exits and early second-peer closure are bounded with direct-child PID cleanup. Instrumentation and finite drain are trusted; this is not a process-tree sandbox or proof about arbitrary delayed work. Close code 4000 is checked on this direct loopback path alongside identity/model/effect/traffic evidence, not used as the sole evidence of recovery (§9.3).
+
+Full suite remains incomplete. ACK-deleted or evicted history, resume expiry, principal isolation, lost tool results, full epoch/tool/capability matrices, automatic client/bidirectional recovery, heartbeat, binary/audio and Python driver are not covered. This profile does not test ACK-deleted-history or heartbeat-specific recovery paths.
