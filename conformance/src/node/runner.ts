@@ -2,6 +2,8 @@ import type { CaseResult, Profile, Report, Wire } from '../report.js';
 import { cancellation, CANCELLATION_CASES, IncompleteDriver } from './cancellation.js';
 import { authCredentials, authenticateScenario, AUTH_CASES, AUTH_PROFILE, IncompleteAuthDriver } from './auth.js';
 import { serverToolStream, STREAM_CASES, STREAM_PROFILE, IncompleteStream } from './server-tool-stream.js';
+import { CONTROL_PROFILE, CONTROL_CASES, IncompleteControl } from '../client-control-oracle.js';
+import { clientControl } from './client-control.js';
 import { assets } from './assets.js';
 import { until } from './deadline.js';
 import { ProcessDriver } from './process-driver.js';
@@ -20,6 +22,7 @@ export async function run(options: Options): Promise<Report> {
   if (profile === 'tool-cancellation-v1' && options.mode !== 'client') throw new Error('tool-cancellation-v1 only supports client mode');
   if (profile === AUTH_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-auth-v1 requires server mode and --exec');
   if (profile === STREAM_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-tool-stream-v1 requires server mode and --exec');
+  if (profile === CONTROL_PROFILE && (options.mode !== 'client' || !options.command || options.url)) throw new Error('client-control-validation-v1 requires client mode and --exec');
   const report: Report = {
     protocol: 1, profile, fullSuite: 'incomplete', mode: options.mode,
     capabilities: [], cases: [], remaining: ['resume/replay', 'heartbeat', 'audio', 'queued/running cancellation', 'optional capabilities', 'server interruption routing'],
@@ -29,7 +32,8 @@ export async function run(options: Options): Promise<Report> {
   else report.remaining = report.remaining.map(item => item === 'queued/running cancellation' ? item + ' (separate profile)' : item);
   if (profile === AUTH_PROFILE) report.remaining.unshift('handshake/interrupt baseline (separate profile)', 'resume principal isolation');
   if (profile === STREAM_PROFILE) report.remaining.unshift('handshake/auth/cancellation (separate profiles)', 'client tool-stream observations', 'additional capability matrices');
-  const required = profile === STREAM_PROFILE ? STREAM_CASES : profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
+  if (profile === CONTROL_PROFILE) report.remaining = ['other profiles (selected separately)', 'pre-ready client errors', 'binary/audio', 'heartbeat', 'resume/replay', 'additional exception matrices', 'Python driver'];
+  const required = profile === CONTROL_PROFILE ? CONTROL_CASES : profile === STREAM_PROFILE ? STREAM_CASES : profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
     ? ['client/handshake/baseline', 'client/interrupt/stale-call']
     : ['server/handshake/baseline', 'server/handshake/version'];
   for (const id of required) {
@@ -38,7 +42,7 @@ export async function run(options: Options): Promise<Report> {
     if (definitions.length === 0) report.cases.push({ id, status: 'incomplete', durationMs: 0, expected: 'Required profile scenario present', actual: 'Missing scenario definition', stage: 'inventory' });
   }
   for (const scenario of selected) {
-    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES, ...STREAM_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
+    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES, ...STREAM_CASES, ...CONTROL_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
     const start = performance.now(); const end = start + options.timeoutMs;
     let stage = 'setup';
     const credentials = profile === AUTH_PROFILE ? authCredentials() : undefined;
@@ -51,7 +55,7 @@ export async function run(options: Options): Promise<Report> {
         if (!options.command) throw new Error('Client mode requires --exec');
         host = await listen();
         driver = new ProcessDriver(options.command, options.args, host.url);
-        const ready = driver.request('ready', {}, end);
+        const ready = driver.request('ready', profile === CONTROL_PROFILE ? { profile } : {}, end);
         // Observe rejection while awaiting the network side of the same handshake.
         void ready.catch(() => {});
         stage = 'hello';
@@ -64,7 +68,9 @@ export async function run(options: Options): Promise<Report> {
         stage = 'ready';
         const info = await ready;
         if (!Array.isArray(info.capabilities) || info.capabilities.length !== 0) throw new Error('Baseline negotiated capabilities must be empty');
-        if (profile === 'tool-cancellation-v1') {
+        if (profile === CONTROL_PROFILE) {
+          result.actual = await clientControl(scenario.id, peer, driver, oracle, info, options.assets, end, value => { stage = value; });
+        } else if (profile === 'tool-cancellation-v1') {
           result.actual = await cancellation(peer, driver, oracle, info, end, scenario.id.endsWith('late-rejection'), value => { stage = value; });
         } else if (scenario.id === 'client/interrupt/stale-call') {
           peer.send({ v: 1, seq: 1, type: 'turn.state', turnId: 'conformance-turn', epoch: EPOCH, state: 'thinking' });
@@ -123,7 +129,7 @@ export async function run(options: Options): Promise<Report> {
       }
       result.status = 'pass';
     } catch (error) {
-      if (error instanceof IncompleteStream || error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
+      if (error instanceof IncompleteControl || error instanceof IncompleteStream || error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
       result.actual = { error: error instanceof Error ? error.message : String(error), trace: peer?.messages ?? [], close: peer?.closeInfo };
     }
     finally {
