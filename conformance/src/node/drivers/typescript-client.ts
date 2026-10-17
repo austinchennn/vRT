@@ -1,9 +1,11 @@
 import { connect, type ClientSession, type ClientToolContext } from '@vrealtime/client';
 import type { Wire } from '../../report.js';
+import { controlClient } from './client-control.js';
 import { control } from './control.js';
 import { deferred } from '../deadline.js';
 
 interface Effects { received: boolean; started: number; committed: number; aborted: boolean; completed: number }
+let validation: Awaited<ReturnType<typeof controlClient>> | undefined;
 let session: ClientSession | undefined;
 let epoch = 0;
 let started = 0;
@@ -59,6 +61,7 @@ async function drain(): Promise<void> {
   await new Promise<void>(resolve => setImmediate(resolve));
 }
 async function close(): Promise<void> {
+  await validation?.close();
   if (!session) return;
   await session.close();
   if (!released) releaseBlocked('resolve');
@@ -67,8 +70,13 @@ async function close(): Promise<void> {
 }
 function effects(): Wire { return { started, committed, calls: Object.fromEntries(calls) }; }
 control(async (command, data) => {
+  if (validation && command !== 'close') return validation.handle(command, data);
   switch (command) {
     case 'ready':
+      if (data.profile === 'client-control-validation-v1') {
+        validation = await controlClient(process.env.VRT_CONFORMANCE_URL!);
+        return { capabilities: validation.capabilities, driverCapabilities: ['client-control-validation-v1'] };
+      }
       session = await connect(process.env.VRT_CONFORMANCE_URL!, {
         reconnect: false, audio: false,
         tools: { probe: { description: 'Counts tool starts and effects', parameters: { type: 'object' }, run: (_args, context) => probe(context) } },
