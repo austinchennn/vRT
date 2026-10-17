@@ -143,3 +143,23 @@ This is a test profile identifier, not a negotiated vRT capability. Old `ready {
 The official driver uses public `fakeModel({onCommand})`, its public sessions collection and `serve`; it never sends expected error frames itself. Audio snapshots contain actual bytes (lowercase hex) and model-facing formats; do not omit empty observations when forwarded by the SDK. A legal empty frame may instead be ignored by an implementation. Limits: 64 observed texts of at most 1024 characters, 64 audio chunks of at most 1024 bytes; overflow errors instead of truncating to a passing subset. The runner sends far fewer/smaller inputs. Missing snapshot fields are failures.
 
 A pong receipt fence establishes that preceding frames reached the server; it does not alone prove all asynchronous application work completed. finish must honor the bounded, inert-fixture drain promise. The official driver drains attached continuations through an event-loop fence. Runner then fences the live wire and closes before final trace validation. This is trusted finite instrumentation, not arbitrary-task scheduling control, OS isolation, process-tree supervision or full compatibility certification. Unsupported instrumentation yields incomplete/nonzero. Errors, early connection close, command timeout and process exit retain bounded direct-child cleanup.
+
+## Opt-in `client-control-validation-v1` instrumentation
+
+This client-only profile is a test contract, not a wire capability. The runner starts a dynamic loopback WebSocket server and supplies VRT_CONFORMANCE_URL. All commands use the existing requestId, stdout-only-JSONL, stderr logging, deadline, error and EOF rules. Each case owns a fresh process and SDK.
+
+| Command | Data | Confirmation |
+|---|---|---|
+| `ready` | `{profile:"client-control-validation-v1"}` | Public connect with audio/reconnect disabled, declare synchronous probe tool, await baseline ready, **install public observation listeners before replying** `{capabilities:[],driverCapabilities:["client-control-validation-v1"]}`. |
+| `prepareControl` | `{}` | Once, confirm empty observation window and return snapshot. Do not erase prior effects/errors to conceal them. |
+| `waitControlErrors` | `{count:integer 1..64}` | Wait for that many application error notifications; return complete bounded snapshot. Do not classify frames inside the official driver. |
+| `waitControlMarker` | `{itemId:string}` | Wait for public transcript notification with this ID; return snapshot. |
+| `interrupt` | `{}` | Call SDK public interrupt(), confirm after its synchronous local effects; runner inspects actual wire epoch. |
+| `finishControl` | `{}` | Drain probe-owned work/attached continuations; close SDK, await public closed notification; return final snapshot. No later scenario work remains. Repeated calls may return the same final state. |
+| `close` | `{}` | Idempotent close/EOF cleanup, including partial or failed runs. |
+
+Snapshot: `{errors:[{code,recoverable}],events:[...],started,committed,closed:boolean}`. Record each local invalid-input diagnostic once with its SDK-provided classification and recoverability. Normalize public state, tool.call/tool.result identity, transcript fields, text, tool.preview and interrupted events into `events`; do not filter business events caused by invalid inputs. Tool entry increments started before any application guard, then the synchronous probe commits and increments committed. No asynchronous tool, device, model or background producer is used. This is an observation interface, not a second decoder/gate/dispatcher.
+
+Official errors/events are bounded to 64/128 entries; overflow fails, never silently drops records. Existing 64-KiB JSONL buffer and bounded wire trace remain. A pending wait rejects on observed close; no response/exit/timeout triggers runner's bounded direct-child stop escalation. Close explicitly waits for the public closed event: SDK close() returning alone is not assumed to be socket completion. These controls do not promise process-tree supervision or arbitrary asynchronous-work draining.
+
+The profile starts after ready; it does not require a new SDK API to observe handshake-before-ready errors. Error wording is opaque. Wire field validation is distinct from optional validation of tool arguments against application JSON Schema. Valid callId reuse detection with a different seq is not required (§7.1); this scenario only checks an invalid call cannot reserve the ID of its first valid use.

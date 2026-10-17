@@ -1,3 +1,5 @@
+import { CONTROL_PROFILE, CONTROL_CASES, IncompleteControl } from '../client-control-oracle.js';
+import { clientControl } from './client-control.js';
 import { INPUT_CASES, INPUT_PROFILE, IncompleteInput } from '../input-oracle.js';
 import { serverInput } from './server-input.js';
 import type { CaseResult, Profile, Report, Wire } from '../report.js';
@@ -25,6 +27,7 @@ export async function run(options: Options): Promise<Report> {
   if (profile === STREAM_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-tool-stream-v1 requires server mode and --exec');
   if (profile === HEARTBEAT_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-heartbeat-v1 requires server mode and --exec');
   if (profile === INPUT_PROFILE && (options.mode !== 'server' || !options.command || options.url)) throw new Error('server-input-validation-v1 requires server mode and --exec');
+  if (profile === CONTROL_PROFILE && (options.mode !== 'client' || !options.command || options.url)) throw new Error('client-control-validation-v1 requires client mode and --exec');
   const heartbeatTimeout = options.heartbeatTimeoutMs ?? 1200;
   if (profile === HEARTBEAT_PROFILE && (!Number.isInteger(heartbeatTimeout) || heartbeatTimeout < 100 || heartbeatTimeout > 60000)) throw new Error('Invalid local heartbeat timeout policy');
   const settings = { timeoutMs: heartbeatTimeout, delayAllowanceMs: Math.ceil(heartbeatTimeout / 2), resumeWindowMs: heartbeatTimeout * 6 };
@@ -39,7 +42,8 @@ export async function run(options: Options): Promise<Report> {
   if (profile === STREAM_PROFILE) report.remaining.unshift('handshake/auth/cancellation (separate profiles)', 'client tool-stream observations', 'additional capability matrices');
   if (profile === HEARTBEAT_PROFILE) report.remaining = ['client heartbeat SHOULD behavior', 'other profiles (separately selected)', 'full bidirectional resume/replay', 'binary/audio exception matrices', 'WebSocket control-frame timing interpretation', 'Python network driver'];
   if (profile === INPUT_PROFILE) report.remaining = ['other profiles (selected separately)', 'resume/replay', 'client invalid-input handling', 'output audio/playback/devices', 'additional audio/exception matrices', 'Python driver'];
-  const required = profile === INPUT_PROFILE ? INPUT_CASES : profile === HEARTBEAT_PROFILE ? HEARTBEAT_CASES : profile === STREAM_PROFILE ? STREAM_CASES : profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
+  if (profile === CONTROL_PROFILE) report.remaining = ['other profiles (selected separately)', 'pre-ready client errors', 'binary/audio', 'heartbeat', 'resume/replay', 'additional exception matrices', 'Python driver'];
+  const required = profile === CONTROL_PROFILE ? CONTROL_CASES : profile === INPUT_PROFILE ? INPUT_CASES : profile === HEARTBEAT_PROFILE ? HEARTBEAT_CASES : profile === STREAM_PROFILE ? STREAM_CASES : profile === AUTH_PROFILE ? AUTH_CASES : profile === 'tool-cancellation-v1' ? CANCELLATION_CASES : options.mode === 'client'
     ? ['client/handshake/baseline', 'client/interrupt/stale-call']
     : ['server/handshake/baseline', 'server/handshake/version'];
   for (const id of required) {
@@ -48,7 +52,7 @@ export async function run(options: Options): Promise<Report> {
     if (definitions.length === 0) report.cases.push({ id, status: 'incomplete', durationMs: 0, expected: 'Required profile scenario present', actual: 'Missing scenario definition', stage: 'inventory' });
   }
   for (const scenario of selected) {
-    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES, ...STREAM_CASES, ...HEARTBEAT_CASES, ...INPUT_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
+    if (!['client/handshake/baseline', 'client/interrupt/stale-call', 'server/handshake/baseline', 'server/handshake/version', ...AUTH_CASES, ...CANCELLATION_CASES, ...STREAM_CASES, ...HEARTBEAT_CASES, ...INPUT_CASES, ...CONTROL_CASES].includes(scenario.id)) throw new Error(`Unknown scenario ${scenario.id}`);
     const start = performance.now(); const end = start + options.timeoutMs;
     let stage = 'setup';
     const credentials = profile === AUTH_PROFILE ? authCredentials() : undefined;
@@ -63,7 +67,7 @@ export async function run(options: Options): Promise<Report> {
         if (!options.command) throw new Error('Client mode requires --exec');
         host = await listen();
         driver = new ProcessDriver(options.command, options.args, host.url);
-        const ready = driver.request('ready', {}, end);
+        const ready = driver.request('ready', profile === CONTROL_PROFILE ? { profile } : {}, end);
         // Observe rejection while awaiting the network side of the same handshake.
         void ready.catch(() => {});
         stage = 'hello';
@@ -76,7 +80,9 @@ export async function run(options: Options): Promise<Report> {
         stage = 'ready';
         const info = await ready;
         if (!Array.isArray(info.capabilities) || info.capabilities.length !== 0) throw new Error('Baseline negotiated capabilities must be empty');
-        if (profile === 'tool-cancellation-v1') {
+        if (profile === CONTROL_PROFILE) {
+          result.actual = await clientControl(scenario.id, peer, driver, oracle, info, options.assets, end, value => { stage = value; });
+        } else if (profile === 'tool-cancellation-v1') {
           result.actual = await cancellation(peer, driver, oracle, info, end, scenario.id.endsWith('late-rejection'), value => { stage = value; });
         } else if (scenario.id === 'client/interrupt/stale-call') {
           peer.send({ v: 1, seq: 1, type: 'turn.state', turnId: 'conformance-turn', epoch: EPOCH, state: 'thinking' });
@@ -149,7 +155,7 @@ export async function run(options: Options): Promise<Report> {
       }
       result.status = 'pass';
     } catch (error) {
-      if (error instanceof IncompleteInput || error instanceof IncompleteHeartbeat || error instanceof IncompleteStream || error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
+      if (error instanceof IncompleteControl || error instanceof IncompleteInput || error instanceof IncompleteHeartbeat || error instanceof IncompleteStream || error instanceof IncompleteAuthDriver || error instanceof IncompleteDriver) result.status = 'incomplete';
       result.actual = { error: error instanceof Error ? error.message : String(error), trace: peer?.messages ?? [], close: peer?.closeInfo, ...(profile === HEARTBEAT_PROFILE ? { heartbeat: heartbeatEvidence } : {}) };
     }
     finally {

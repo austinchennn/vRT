@@ -1,6 +1,6 @@
 # vRT black-box conformance profiles
 
-These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1`, `server-auth-v1`, `server-tool-stream-v1` `server-heartbeat-v1` and `server-input-validation-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
+These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1`, `server-auth-v1`, `server-tool-stream-v1`, `server-heartbeat-v1`, `server-input-validation-v1` and `client-control-validation-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
 
 ## Run from a checkout
 
@@ -177,3 +177,29 @@ Instrumentation is trusted: it observes the model's public command hook, uses an
 Full suite remains incomplete. Output audio/playback, devices, resampling, opening-state audio races, full binary/error matrices, reconnect/replay and a Python network driver are outside this profile. Other conformance profiles must be selected separately.
 
 An unsolicited control ACK with upTo 0 does not identify an audio frame and cannot by itself prove audio was acknowledged. The oracle permits it, rejects ACKs beyond the handled control cursor, and checks the final marker for hidden sequence consumption. A separate zero-ACK positive fixture prevents treating all ACK frames as violations.
+
+## Client invalid-control profile
+
+```sh
+node conformance/dist/node/cli.js client --profile client-control-validation-v1 --exec node --json -- conformance/dist/node/drivers/typescript-client.js
+```
+
+This opt-in, client/driver-only profile checks **post-ready** text control inputs under §§4.1–4.3, 6, 7.1 and 9.1. Driver instrumentation is not a wire capability. The runner sends a normal baseline ready and awaits the driver's confirmation that public observations are installed before any invalid injection. Missing/malformed instrumentation is incomplete/nonzero; missing observations fail, never count as zero. Other profiles/default ready/finish keep their existing contracts.
+
+| Stable case ID | Assertions |
+|---|---|
+| `client/control/framing` | Shared malformed JSON/nonobject vectors, plus null/array/bool/string; application reports MALFORMED and continues. |
+| `client/control/version` | Wrong/missing/string versions, including combined type/field faults: UNSUPPORTED_VERSION takes precedence. |
+| `client/control/types` | Wrong direction, exact `__proto__`/`toString`, missing/non-string/unknown types; UNKNOWN_TYPE precedes invalid fields. |
+| `client/control/fields` | Missing seq, zero/negative/fraction/overflow/string/bool seq on sequenced text: INVALID_FIELD, no application effect/cursor advance. |
+| `client/control/state-call` | Invalid high-epoch state and malformed calls with reused-invalid callId cannot run, reserve a call or poison epoch. |
+
+The runner sends raw text and loads unmodified server-direction vectors from installed assets. It validates **target client output**, never demands that its deliberate invalid server injections pass the normal traffic schema. An independent observation oracle checks normalized application diagnostics/effects/events. No SDK codec, Inbox/Outbox or gate is used for judging behavior.
+
+After every invalid input, the driver confirms the public error observation; no business event or tool entry/commit may have occurred. A valid turn.state seq 1 and tool.call seq 2 follow, including a schema-permitted extra property and identical same-seq call retransmission. The legal call executes/commits once. A server transcript seq 3 is the ordered application receipt fence; no server ping is invented. After that fence, one public interrupt() exposes the observed epoch on the real wire and must use 1, detecting hidden epoch pollution even if tool execution still worked. This is only an epoch probe after completed work, not another cancellation matrix.
+
+Finish drains the inert, synchronous probe's attached continuations, closes the SDK and awaits its public closed event before returning final observations. Runner awaits WebSocket close, then checks the complete target trace: one successful logical tool result, correct identities, bounded ACK cursor, schema/capability/sequence validity and final application effects. Identical same-seq result replay passes; conflicting same-seq content and different-seq duplicate results fail. No claim is made that a client must detect valid callId reuse with a different seq: §7.1 explicitly does not require that. An invalid frame using a callId must not reserve it; the later call is its first **valid** use.
+
+The driver uses only public connect/session/event/tool APIs, no private socket/sequence/epoch fields. Its JSONL protocol records at most 64 diagnostics and 128 business events, with existing bounded stdout/trace limits; overflow errors rather than truncating to a passing subset. Controls and real WebSocket data are separate. Bounded failures cover missing error notification, held legal result/finish, no ready, child exit and early close, with direct-child PID cleanup. Repeated close/EOF is safe. Instrumentation and finite drains are trusted, not process-tree isolation or proof against arbitrary delayed work/dishonest drivers.
+
+Full suite remains incomplete. Binary/audio, pre-ready observation, automatic heartbeat/reconnect, full recovery, other exception matrices and Python network driver are not covered here. Arguments are checked as wire fields only: optional application schema validation is not promoted to a MUST.
