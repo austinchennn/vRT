@@ -5,13 +5,14 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "conformance"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p conformance/tsconfig.json",
     "test": "vitest run packages",
     "build": "node scripts/build.mjs",
     "check:budgets": "node scripts/check-budgets.mjs",
@@ -23,7 +24,12 @@
     "test:consumer": "node scripts/consumer-smoke.mjs",
     "publish:dry-run": "node scripts/publish.mjs --dry-run",
     "version:set": "node scripts/set-version.mjs",
-    "test:workers": "npm run build && vitest run examples/workers"
+    "test:workers": "npm run build && vitest run examples/workers",
+    "build:conformance": "npm run build && npm run build -w @vrealtime/conformance",
+    "typecheck:conformance": "tsc -p conformance/tsconfig.json",
+    "test:conformance": "npm run build:conformance && npm run typecheck:conformance && npm test -w @vrealtime/conformance",
+    "pack:conformance": "npm run build:conformance && npm run pack:local -w @vrealtime/conformance",
+    "test:conformance:consumer": "node conformance/test/consumer.mjs"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.3",

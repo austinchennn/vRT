@@ -156,6 +156,10 @@ npm run build && npm run check:budgets && npm run bench
 
 `npm run bench:latency -- --rtt 100` measures how long a tool-argument preview, a tool call and an interruption take to reach the app over a WebSocket with a simulated round-trip time (after `npm run build`).
 
+The partial [black-box conformance profile](conformance/) checks baseline handshakes
+and the client's local interrupt gate across real WebSockets and independent driver
+processes. Run `npm run test:conformance`; passing this profile is not full protocol certification.
+
 ## Documentation
 
 - [Documentation site](https://austinchennn.github.io/vRT/) (English and 中文): quickstart, concepts, guides and API reference. Source in [website/](website/).
