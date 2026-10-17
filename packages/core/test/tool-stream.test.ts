@@ -119,6 +119,31 @@ describe('tool streams in a session', () => {
     expectWellFormed(events);
   });
 
+  it('drops late fragments of issued calls after stream tombstones are evicted', async () => {
+    const probe = tool({ description: 'probe', parameters: {}, run: () => null }) as Tool<never, unknown>;
+    const { session, fake, events } = await setup({ tools: { probe } });
+    try {
+      respond(fake);
+      for (let i = 0; i < 257; i++) {
+        const callId = `c${i}`;
+        const settled = new Promise<void>((resolve) => {
+          const off = session.on('tool.stream', (event) => {
+            if (event.callId === callId && event.phase === 'settled') { off(); resolve(); }
+          });
+        });
+        fake.emit({ type: 'tool.call', responseId: 'r1', callId, name: 'probe', arguments: {} });
+        await settled;
+      }
+      fake.emit({ type: 'tool.call.delta', responseId: 'r1', callId: 'c0', name: 'probe', argumentsDelta: 'late' });
+      expect(phases(events).c0).toEqual(['start', 'arguments-complete', 'settled']);
+      // The response is still live: a distinct collecting call must not be suppressed.
+      fake.emit({ type: 'tool.call.delta', responseId: 'r1', callId: 'fresh', name: 'probe', argumentsDelta: '{' });
+      expect(phases(events).fresh).toEqual(['start', 'arguments-delta']);
+    } finally {
+      await session.close();
+    }
+  });
+
   it('gives a model without argument streaming start, complete and a terminal phase', async () => {
     const { session, fake, events } = await setup({ clientTools: ['paint'], capabilities: { tools: { argumentStreaming: false } } });
     respond(fake);
