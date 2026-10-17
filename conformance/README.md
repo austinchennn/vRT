@@ -1,6 +1,6 @@
 # vRT black-box conformance profiles
 
-These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1`, `server-auth-v1`, `server-tool-stream-v1`, `server-heartbeat-v1`, `server-input-validation-v1`, `client-control-validation-v1` and `server-resume-replay-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
+These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1`, `server-auth-v1`, `server-tool-stream-v1`, `server-heartbeat-v1`, `server-input-validation-v1`, `client-control-validation-v1`, `server-resume-replay-v1` and `server-resume-principal-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
 
 ## Run from a checkout
 
@@ -230,3 +230,21 @@ A prefix model marker and ordered pong establish the captured prefix; only the s
 Real-wire faults cover missing middle/last messages, changed content/seq, wrong resumedFrom, replacement session/model, duplicate context effects, missing/wrong old close, replayed transient ready, conflicting replay and missing observations. Correct independent servers and identical same-seq replay pass. Held close/context/finish/replay, startup/no response, exits and early second-peer closure are bounded with direct-child PID cleanup. Instrumentation and finite drain are trusted; this is not a process-tree sandbox or proof about arbitrary delayed work. Close code 4000 is checked on this direct loopback path alongside identity/model/effect/traffic evidence, not used as the sole evidence of recovery (§9.3).
 
 Full suite remains incomplete. ACK-deleted or evicted history, resume expiry, principal isolation, lost tool results, full epoch/tool/capability matrices, automatic client/bidirectional recovery, heartbeat, binary/audio and Python driver are not covered. This profile does not test ACK-deleted-history or heartbeat-specific recovery paths.
+
+## Server recovery authentication and principal isolation
+
+Select `server-resume-principal-v1` explicitly (server mode and independent driver required):
+
+```sh
+node conformance/dist/node/cli.js server --profile server-resume-principal-v1 --exec node --json -- conformance/dist/node/drivers/typescript-server.js
+```
+
+Four stable cases under `server/resume-principal/` cover `same-owner`, `foreign-parked`, `foreign-live` and `reauth`. Every case has fresh runner-generated Alice-A/Alice-B/Bob/invalid tokens. Both Alice tokens map to the same principal.id but each authentication returns a fresh object. Bob maps to another ID; invalid and missing tokens are refused. These are local test identities, not negotiated capabilities, JWT/OAuth or production accounts. No token enters the URL; reports redact all four, including malicious wire/control/stderr echoes.
+
+The official driver uses only public authenticate, Hub.attach/Connection.receive/closed, onContext and fake-model APIs. It records bounded identity labels and new/resume facts, never tokens. Wire is authoritative for refusals: foreign and unknown sessions get non-recoverable RESUME_FAILED seq 0 then 4404; invalid/missing authentication gets UNAUTHORIZED seq 0 then 4401. Rejected connections get no ready/business. The foreign-parked case checks both known-foreign and unknown requests against these normative semantics, without imposing exact text/reason equality or claiming timing/side-channel certification (§§5.3–5.4,9.3).
+
+Alice's later successful recovery/new-token model marker proves a rejected takeover did not destroy her parked session. In foreign-live, Alice sends a context observed by public onContext, then receives a new public model marker after Bob's complete close; this detects closing/replacing the owner before authorization. Final effects require one model session, correct ordered authentication observations, actual context values and full close traces. Processing cursor 1 deliberately avoids a replay matrix; this is not client auto-resume or full bidirectional recovery.
+
+All extra peers are finally-owned; SDK detach confirmations follow public close delivery. Independent wire faults cover skipped resume auth, token binding, accepted foreign owners, leaked ready/data, owner closure/deletion, wrong error classes, numbering/identity/cursor/model changes, conflicting replay and missing observations. Identical same-seq replay and real SDK authenticate exceptions have positive controls. Missing inventory/instrumentation is incomplete/nonzero. fullSuite remains incomplete.
+
+No production SDK/schema/dependency changes are included. Expiry, capacity exhaustion, lost tool results, Python driver and a full security matrix remain outside this profile. Trusted finite model/auth/context instrumentation is not dishonest-driver detection, arbitrary-work supervision or a process-tree sandbox. This profile is independent of unmerged normal-recovery and ACK-boundary PRs.

@@ -1,0 +1,6 @@
+[
+  {"profile":"server-resume-principal-v1","id":"server/resume-principal/same-owner","expected":"A fresh token/principal object for the same principal.id resumes the original session/model"},
+  {"profile":"server-resume-principal-v1","id":"server/resume-principal/foreign-parked","expected":"Foreign parked-session and unknown-session resumes are rejected alike without harming the owner's recovery"},
+  {"profile":"server-resume-principal-v1","id":"server/resume-principal/foreign-live","expected":"Foreign live-session resume is rejected without replacing the owner's usable connection"},
+  {"profile":"server-resume-principal-v1","id":"server/resume-principal/reauth","expected":"Invalid and missing credentials cannot bypass resume authentication; owner can still recover"}
+]
