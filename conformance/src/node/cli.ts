@@ -14,8 +14,9 @@ try {
   } });
   const mode = positionals[0];
   const profile = values.profile;
-  if (profile !== 'handshake-interrupt-v1' && profile !== 'tool-cancellation-v1') throw new Error('Unknown profile');
+  if (profile !== 'handshake-interrupt-v1' && profile !== 'tool-cancellation-v1' && profile !== 'server-auth-v1') throw new Error('Unknown profile');
   if (profile === 'tool-cancellation-v1' && mode !== 'client') throw new Error('Cancellation profile requires client mode');
+  if (profile === 'server-auth-v1' && (mode !== 'server' || !values.exec || values.url)) throw new Error('server-auth-v1 requires server mode and --exec');
   const timeoutMs = Number(values['timeout-ms']);
   if (positionals.length !== 1 || (mode !== 'client' && mode !== 'server') || !Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60000) {
     throw new Error('Usage: vrt-conformance client|server [--exec PROGRAM | --url WS_URL] [--json] [--profile NAME] [--timeout-ms 5000] -- DRIVER_ARGS (timeout 1..60000 ms)');

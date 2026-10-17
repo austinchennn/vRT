@@ -60,7 +60,25 @@ A running call may send INTERRUPTED immediately **or after completion** (§7.2).
 
 `ready {}` starts an anonymous test server with deterministic model fixture and returns `{url: "ws://127.0.0.1:<dynamic-port>"}`. No startup URL is printed separately. `close {}` is idempotent and releases server/session resources. stdin EOF must also clean up.
 
-Only handshake cases need a server driver in this phase. No private model-state query, effect query or emitScenario operation is required until future server behavior scenarios are implemented. A supplied `--url` skips driver startup and runs the same handshake profile on an existing appropriately configured test endpoint.
+Only baseline handshake cases need the default server driver. No private model-state query, effect query or emitScenario operation is required until future server behavior scenarios are implemented. A supplied `--url` skips driver startup and runs the same handshake profile on an existing appropriately configured test endpoint.
+
+## Opt-in `server-auth-v1` instrumentation
+
+The runner selects this profile explicitly; the default `ready {}` behavior is preserved. Each case has its own process and test token. Request shape (the placeholder below is illustrative, never a real credential):
+
+```json
+{"requestId":"1","command":"ready","data":{"profile":"server-auth-v1","authToken":"<ephemeral-test-token>"}}
+```
+
+Before acknowledging, the driver starts a server on an OS-assigned loopback port. Its **public authenticate hook** must accept exactly that token and return a deterministic test principal; absent or different tokens are refused. The official driver uses `serve(..., {authenticate})`, not private session fields. The driver replies only when the listener is ready:
+
+```json
+{"requestId":"1","ok":true,"data":{"url":"ws://127.0.0.1:<dynamic-port>","driverCapabilities":["server-auth-v1"]}}
+```
+
+`driverCapabilities` declares supported **test instrumentation**, not vRT negotiated capabilities. `authToken` configures only this isolated test server. No new wire capability or public wire field is introduced. Missing support yields incomplete/nonzero status. An instrumented driver that cannot configure authentication must return a control error; it must not fall back to anonymous service. `close {}` and stdin EOF release server/session/socket resources idempotently, including after rejected authentication or a timed-out case. Request IDs, errors, timeout and process-exit rules above remain unchanged.
+
+The control token stays out of argv, URLs and normal reports; stdout contains only JSONL replies. Logs on stderr must omit tokens too. The runner redacts the literal generated good and wrong token values if an erroneous driver/peer echoes them in a failure trace, close reason or captured error. Drivers are trusted and this does not sanitize arbitrarily encoded secrets or change their own logging obligations. There is no production identity provider or language-specific contract requirement.
 
 ## Ownership and completeness
 

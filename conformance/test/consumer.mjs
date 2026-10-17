@@ -26,6 +26,11 @@ try {
   assert.equal(cancellation.fullSuite, 'incomplete');
   assert.equal(cancellation.cases.length, 2);
   assert.ok(cancellation.cases.every(c => c.status === 'pass'), JSON.stringify(cancellation));
+  const authArgs = ['server', '--profile', 'server-auth-v1', '--exec', process.execPath, '--json', '--', join(pkg, 'dist/node/drivers/typescript-server.js')];
+  const auth = JSON.parse(execFileSync(cli, authArgs, { cwd: temp, encoding: 'utf8', timeout: 15000 }));
+  assert.equal(auth.cases.length, 4);
+  assert.ok(auth.cases.every(c => c.status === 'pass'));
+  assert.equal(auth.fullSuite, 'incomplete');
   // A partial/corrupt scenario inventory must not silently become a smaller passing profile.
   const inventory = join(pkg, 'dist/assets/scenarios.json');
   const definitions = JSON.parse(readFileSync(inventory, 'utf8'));
@@ -33,6 +38,11 @@ try {
   assert.throws(() => execFileSync(cli, ['client', '--exec', process.execPath, '--json', '--', join(pkg, 'dist/node/drivers/typescript-client.js')], { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
     const report = JSON.parse(error.stdout);
     return error.status === 1 && report.cases.some(c => c.id === 'client/interrupt/stale-call' && c.status === 'incomplete');
+  });
+  writeFileSync(inventory, JSON.stringify(definitions.filter(s => s.id !== 'server/auth/wrong-token')));
+  assert.throws(() => execFileSync(cli, authArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
+    const report = JSON.parse(error.stdout);
+    return error.status === 1 && report.cases.some(c => c.id === 'server/auth/wrong-token' && c.status === 'incomplete');
   });
   writeFileSync(inventory, JSON.stringify(definitions.filter(s => s.id !== 'client/cancellation/late-rejection')));
   assert.throws(() => execFileSync(cli, ['client', '--profile', 'tool-cancellation-v1', '--exec', process.execPath, '--json', '--', join(pkg, 'dist/node/drivers/typescript-client.js')], { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {

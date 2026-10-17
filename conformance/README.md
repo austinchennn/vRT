@@ -1,6 +1,6 @@
 # vRT black-box conformance profiles
 
-These are **partial** `handshake-interrupt-v1` and `tool-cancellation-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
+These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1` and `server-auth-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
 
 ## Run from a checkout
 
@@ -19,7 +19,7 @@ node conformance/dist/node/cli.js client --profile tool-cancellation-v1 --exec n
 node conformance/dist/node/cli.js server --url ws://localhost:8790 --json
 ```
 
-Use a test server that accepts the baseline anonymous `hello`; authentication profiles are not part of this phase. External production endpoints may need other profiles and must not be reported as globally nonconformant solely for lacking this fixture configuration.
+The default profile needs a test server that accepts the baseline anonymous `hello`. Select `server-auth-v1` explicitly for the isolated authentication configuration below. External production endpoints may need other profiles and must not be reported as globally nonconformant solely for lacking this fixture configuration.
 
 `--timeout-ms` is a per-case monotonic deadline, default 5000 ms, configurable from 1 to 60000 ms. Cleanup has separate short bounded deadlines so expired cases can still terminate their resources. The timeout is a harness policy, not a normative vRT timing requirement. Omit `--json` for a human-readable report. Exit 0 means **all selected profile cases passed**; 1 means a case failed/missing; 2 means invalid invocation or setup/assets failure. Every report still says `fullSuite: incomplete`.
 
@@ -50,6 +50,27 @@ Tests include a stale-executing client (returns INTERRUPTED but increments effec
 
 Not implemented: complete message-vector conformance, reconnect/replay scenarios, ACK bounds, heartbeat, audio, server interruption routing, capability-enabled scenarios and Python/network drivers. A bare server URL cannot establish tool-internal effects; only the listed handshake cases run in server mode.
 
+## Authentication and session-error profile
+
+```sh
+node conformance/dist/node/cli.js server --profile server-auth-v1 --exec node --json -- conformance/dist/node/drivers/typescript-server.js
+```
+
+This profile requires a server driver; client mode and bare `--url` are rejected. The default profile and anonymous `ready {}` contract are unchanged. Each case starts a new server process with a fresh random test-only credential over JSONL. The driver must advertise `driverCapabilities: ["server-auth-v1"]`; missing instrumentation yields **incomplete** and exit 1, not a conformance verdict about a production authentication system. Driver instrumentation, test authentication configuration, and negotiated vRT capabilities are separate concepts.
+
+| Stable case ID | Normative assertion |
+|---|---|
+| `server/auth/missing-token` | Legal hello without auth: UNAUTHORIZED, recoverable false, seq 0, no ready, then WebSocket close 4401 (§5.3). |
+| `server/auth/wrong-token` | Structurally valid but incorrect credential: same refusal; not INVALID_FIELD (§5.3). |
+| `server/auth/correct-token` | Correct credential: valid baseline ready with no unoffered capabilities (§3.3, §5.2). |
+| `server/auth/error-sequence` | Raw malformed JSON before hello: MALFORMED/recoverable true/seq 0; authenticate on that same connection; raw malformed JSON after ready: sequenced positive error; ping/pong still works (§4.1, §9.1). |
+
+The runner observes public close code/reason and the count of preceding frames. Rejection requires error-before-close; success uses a normal WebSocket close fence before the independent oracle checks the full bounded trace. The oracle derives binding from ready, checks schema separately, and enforces current-stream numbering without calling SDK codecs or sequence helpers. These scenarios establish no resumed session. Recoverability alone is not used to infer a generic close policy.
+
+Wire fixtures deliberately accept wrong credentials, number sessionless errors positively or bound errors as 0, close with the wrong code, close without an error, or leave a refusal open. Each must fail its matching stable case. Tests also cover absent instrumentation, process exit, no control response, repeated cleanup and literal credential redaction in wire traces, close reasons, driver errors and captured stderr. The runner removes both generated credential strings from reports, including failure/cleanup paths. It never forwards driver stderr directly to the terminal. Drivers remain trusted local instrumentation: this is not a secret manager or protection against a malicious driver encoding credentials differently. Tokens must not be logged by a driver or put into a URL. No JWT/OAuth, real account, new dependency or SDK authentication implementation is added.
+
+This profile does not include auth on resume, foreign-principal isolation, token refresh, optional tool streaming or the queued/running cancellation profile merged separately in #39. `fullSuite` remains incomplete. The existing CI invocation discovers all profile test files; production SDK publishing and dependency boundaries are unchanged.
+
 ## Build, install and packaging
 
 ```sh
@@ -59,7 +80,7 @@ npm run pack:conformance
 npm run test:conformance:consumer
 ```
 
-The consumer check packs and installs the actual tarball into an unrelated temporary directory, then invokes its installed `vrt-conformance` executable for both original reference modes and the cancellation profile. It requires registry access or a populated npm cache for existing runtime dependencies. The package is marked private to prevent accidental registry publication; `npm pack` and local installation still work. Package-name availability and public release are not claimed.
+The consumer check packs and installs the actual tarball into an unrelated temporary directory, then invokes its installed `vrt-conformance` executable for both original reference modes and the cancellation and authentication profiles, including missing-scenario detection. It requires registry access or a populated npm cache for existing runtime dependencies. The package is marked private to prevent accidental registry publication; `npm pack` and local installation still work. Package-name availability and public release are not claimed.
 
 Build copies current schema, shared vectors, capability registry and scenarios into `dist/assets` and includes LICENSE. Installed CLI asset paths are relative to the executable, never the checkout/current directory. Official reference drivers are bundled from the locally built SDK; they therefore test that build, not whichever SDK an external user happens to have installed. To test a different implementation, supply its own executable following [driver-protocol.md](driver-protocol.md).
 
