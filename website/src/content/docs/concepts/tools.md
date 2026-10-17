@@ -66,11 +66,15 @@ The app can follow every call, server or app, through its lifecycle with `tool.s
 | `cancelled` | | Its turn was interrupted |
 | `failed` | `message` | The model stopped before completing the arguments |
 
-Every call starts with `start` and ends with exactly one of `settled`, `cancelled` or `failed`. A model that does not stream arguments goes straight from `start` to `arguments-complete`, so show a waiting state there.
+Every call starts with `start` and ends with exactly one of `settled`, `cancelled` or `failed`, unless the session ends first. A model that does not stream arguments goes straight from `start` to `arguments-complete`, so show a waiting state there.
 
-Streams are for display only. `arguments-complete` runs nothing: an app tool still runs only through its `run`, behind the epoch gate. When the user interrupts, the client cancels every open call of that turn at once, without waiting for the server. The output of a server tool never reaches the app; `settled` only says whether it succeeded.
+Streams are for display only. `arguments-complete` runs nothing: an app tool still runs only through its `run`, behind the epoch gate. When the user interrupts, the client cancels every open call of that turn at once, without waiting for the server. A server tool's result output is not included in `tool.stream`; `settled` only says whether it succeeded. Application-provided progress is still application data.
 
 Tool streams need the `tool-stream-v1` capability, which the browser client and the TypeScript server both support. With a server that lacks it, the app receives the older `tool.preview` events instead, and it keeps receiving them alongside `tool.stream` for compatibility.
+
+On final session close, clear application preview state from the public `closed` event; the client does not synthesize a terminal event for every open call. A lost connection may still resume the same session. Cancellation is cooperative: checking a signal does not undo a committed effect, and applications own durable idempotency and transaction policies.
+
+`tool-stream-v1` remains a draft capability. Supporting its lifecycle does not require a model to emit argument fragments.
 
 ## Validation
 

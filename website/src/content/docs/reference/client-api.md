@@ -36,7 +36,7 @@ Opens a connection and resolves once the session is ready. Rejects if the connec
 | `transcript` | `role` (`user` or `agent`), `itemId`, `text`, `final` | Speech was transcribed; interim updates have `final: false` |
 | `text` | `responseId`, `delta` | A chunk of the agent's text response |
 | `tool.call` | `callId`, `name`, `arguments`, `turnId`, `epoch` | A tool call arrived (whether or not it will run) |
-| `tool.stream` | `callId`, `name`, `turnId`, `epoch`, `phase`, and per phase `delta`, `arguments`, `progress`, `ok` / `code` or `message` | One step of a call's lifecycle (`tool-stream-v1`); exactly one terminal phase per call |
+| `tool.stream` | `callId`, `name`, `turnId`, `epoch`, `phase`, and per phase `delta`, `arguments`, `progress`, `ok` / `code` or `message` | One step of a call's lifecycle (`tool-stream-v1`); one terminal phase unless the session ends first; final close does not synthesize per-call terminals |
 | `tool.preview` | `callId`, `name`, `epoch`, `preview` | Display-only progress of a call (protocol 1.0); never for a closed epoch |
 | `tool.result` | `callId`, `name`, `turnId`, `epoch`, `result` | A call's one result |
 | `interrupted` | `epoch`, `source` (`local` or `server`) | `epoch` and every earlier epoch closed; once per closure |
