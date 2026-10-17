@@ -11,6 +11,7 @@ from .protocol import (
     PROTOCOL_VERSION,
     SERVER_MESSAGE_TYPES,
     SPEC_REVISION,
+    TRANSIENT_MESSAGE_TYPES,
     AudioFrame,
     DecodeResult,
     Direction,
@@ -22,8 +23,12 @@ from .protocol import (
     encode_message,
     validate_message,
 )
+from .sequence import DEFAULT_REPLAY_LIMIT, Inbox, Outbox
 
 __all__ = [
+    'DEFAULT_REPLAY_LIMIT',
+    'Inbox',
+    'Outbox',
     'AUDIO_HEADER_BYTES',
     'CLIENT_MESSAGE_TYPES',
     'INPUT_AUDIO',
@@ -34,6 +39,7 @@ __all__ = [
     'PROTOCOL_VERSION',
     'SERVER_MESSAGE_TYPES',
     'SPEC_REVISION',
+    'TRANSIENT_MESSAGE_TYPES',
     'AudioFrame',
     'DecodeResult',
     'Direction',

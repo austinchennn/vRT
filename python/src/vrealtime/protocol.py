@@ -227,7 +227,7 @@ _SERVER: dict[str, tuple[Shape, Shape]] = {
 }
 CLIENT_MESSAGE_TYPES = tuple(_CLIENT)
 SERVER_MESSAGE_TYPES = tuple(_SERVER)
-_TRANSIENT = frozenset({'hello', 'ready', 'audio.start', 'ack', 'ping', 'pong'})
+TRANSIENT_MESSAGE_TYPES = frozenset({'hello', 'ready', 'audio.start', 'ack', 'ping', 'pong'})
 _STREAM_FIELDS: dict[str, Shape] = {
     'start': {},
     'cancelled': {},
@@ -288,7 +288,9 @@ def validate_message(value: Any, direction: Direction) -> DecodeResult[dict]:
     if type(kind) is not str or kind not in shapes:
         return DecodeResult(error=ProtocolError('UNKNOWN_TYPE', 'Unknown message type for sender'))
     seq = value.get('seq')
-    valid_seq = _uint32(seq) and (seq == 0 if kind in _TRANSIENT else kind == 'error' or seq > 0)
+    valid_seq = _uint32(seq) and (
+        seq == 0 if kind in TRANSIENT_MESSAGE_TYPES else kind == 'error' or seq > 0
+    )
     required, optional = shapes[kind]
     bad = 'seq' if not valid_seq else _bad_field(value, required, optional)
     if bad is None and kind == 'tool.result':
