@@ -1,6 +1,6 @@
 # vRT black-box conformance profiles
 
-These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1` and `server-auth-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
+These are **partial** `handshake-interrupt-v1` (default), `tool-cancellation-v1`, `server-auth-v1` and `server-tool-stream-v1` profiles for [#17](https://github.com/austinchennn/vRT/issues/17), not certification of a complete vRT implementation. It tests real WebSocket traffic and controls public SDK APIs through independent JSONL driver processes. No model account, device, browser or API key is needed.
 
 ## Run from a checkout
 
@@ -71,6 +71,32 @@ Wire fixtures deliberately accept wrong credentials, number sessionless errors p
 
 This profile does not include auth on resume, foreign-principal isolation, token refresh, optional tool streaming or the queued/running cancellation profile merged separately in #39. `fullSuite` remains incomplete. The existing CI invocation discovers all profile test files; production SDK publishing and dependency boundaries are unchanged.
 
+## Server tool-stream profile
+
+```sh
+node conformance/dist/node/cli.js server --profile server-tool-stream-v1 --exec node --json -- conformance/dist/node/drivers/typescript-server.js
+```
+
+This explicit, driver-only profile checks server behavior under §§3.3, 7.4 and 7.5. It does not certify client display behavior or implement a document editor. Missing driver instrumentation or a declined optional wire capability yields incomplete/nonzero; enabling an unoffered capability is a failure. The actual per-case negotiated set is reported; the top-level capabilities field is their union.
+
+| Stable case ID | Assertions |
+|---|---|
+| `server/tool-stream/baseline` | No capability offered/enabled, no tool.stream, deterministic server tool completes once; legacy preview shape stays opaque. |
+| `server/tool-stream/lifecycle` | Two calls with interleaved parameter fragments each have consistent identity, start first, complete once, progress after complete and one settled terminal; no legacy preview or server result output. |
+| `server/tool-stream/no-delta` | A model configured without argument streaming directly issues the call: start, complete and terminal, no fragments required. |
+| `server/tool-stream/failed` | Response ends with incomplete arguments: failed terminal, no tool entry/commit; a late model delta cannot reopen it. |
+| `server/tool-stream/cancelled` | Runner observes fragments before sending a valid wire interrupt for the observed epoch; cancelled terminal and no tool effects even after explicitly injected old model delta/full-call events. |
+
+The reference driver uses public `fakeModel` events and `ToolContext.emit`, never handcrafted wire frames or private SDK state. It holds server tools on an application-owned deferred release, with separate started/committed counters. The two-call case checks state isolation; the SDK still owns actual tool scheduling. Tool output is a known test-only marker, which must not appear in tool.stream. The no-delta case suppresses tool progress too, preserving the literal start/complete/terminal path described in §7.5.
+
+**Live completion fence:** begin acknowledges synchronous model event injection; a runner ping/pong then drains previously queued wire frames before examining the partial-arguments prefix and effects. After full calls, public tool entry is confirmed while commit remains held. Finish releases owned work, observes public model result submission and drains attached continuations with an event-loop fence. A second ping/pong proves the connection is still usable before the oracle requires all terminals. Finally the runner closes normally and checks the entire bounded transcript again. These fences are part of the trusted driver contract, not a universal proof about arbitrary delayed work.
+
+§7.5 exempts sessions ending before a terminal. A valid prefix cut short by connection close is reported incomplete (connection loss alone does not prove the session ended), not falsely diagnosed as a missing-terminal protocol violation. A missing terminal at the **live** completion fence fails the fixture contract/required case. Already observable schema, capability, ordering or conflicting-replay violations remain failures even when the peer then closes.
+
+The independent oracle validates schema and registry gating, contiguous new sequences, identical same-seq replay, and per-call lifecycle state. It rejects conflicting same-seq content and new-seq duplicate terminal steps. Baseline callers still negotiate nothing and reject gated messages. Fault fixtures also exercise unoffered capabilities, early progress, duplicate complete, changed identity, legacy/new double delivery, output leakage and reopening. Unresponsive/held/exiting/early-closing fixtures and an actual SDK tool whose release is withheld verify bounded cleanup and vanished direct-child PIDs. Close/EOF cleanup is idempotent; this adds no process-tree sandbox guarantee.
+
+Known normative context: §3.3's final sentence still says the registry is empty, while §7.5 and the actual registry define draft tool-stream-v1. This profile follows those explicit definitions and reports the discrepancy without editing normative files. Schemas allow unknown members; server-result non-disclosure is checked semantically rather than inferred from additionalProperties. Other optional matrices, client UI/SHOULD behavior, reconnect/replay, binary/audio, heartbeat and VDoc context/transactions remain outside this profile. `fullSuite` remains incomplete.
+
 ## Build, install and packaging
 
 ```sh
@@ -80,7 +106,7 @@ npm run pack:conformance
 npm run test:conformance:consumer
 ```
 
-The consumer check packs and installs the actual tarball into an unrelated temporary directory, then invokes its installed `vrt-conformance` executable for both original reference modes and the cancellation and authentication profiles, including missing-scenario detection. It requires registry access or a populated npm cache for existing runtime dependencies. The package is marked private to prevent accidental registry publication; `npm pack` and local installation still work. Package-name availability and public release are not claimed.
+The consumer check packs and installs the actual tarball into an unrelated temporary directory, then invokes its installed `vrt-conformance` executable for both original reference modes and the cancellation, authentication and server tool-stream profiles, including missing-scenario detection. It requires registry access or a populated npm cache for existing runtime dependencies. The package is marked private to prevent accidental registry publication; `npm pack` and local installation still work. Package-name availability and public release are not claimed.
 
 Build copies current schema, shared vectors, capability registry and scenarios into `dist/assets` and includes LICENSE. Installed CLI asset paths are relative to the executable, never the checkout/current directory. Official reference drivers are bundled from the locally built SDK; they therefore test that build, not whichever SDK an external user happens to have installed. To test a different implementation, supply its own executable following [driver-protocol.md](driver-protocol.md).
 

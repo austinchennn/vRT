@@ -31,6 +31,13 @@ try {
   assert.equal(auth.cases.length, 4);
   assert.ok(auth.cases.every(c => c.status === 'pass'));
   assert.equal(auth.fullSuite, 'incomplete');
+  const streamArgs = ['server', '--profile', 'server-tool-stream-v1', '--exec', process.execPath, '--json', '--', join(pkg, 'dist/node/drivers/typescript-server.js')];
+  const stream = JSON.parse(execFileSync(cli, streamArgs, { cwd: temp, encoding: 'utf8', timeout: 15000 }));
+  assert.equal(stream.profile, 'server-tool-stream-v1');
+  assert.equal(stream.cases.length, 5);
+  assert.ok(stream.cases.every(c => c.status === 'pass'));
+  assert.deepEqual(stream.capabilities, ['tool-stream-v1']);
+  assert.equal(stream.fullSuite, 'incomplete');
   // A partial/corrupt scenario inventory must not silently become a smaller passing profile.
   const inventory = join(pkg, 'dist/assets/scenarios.json');
   const definitions = JSON.parse(readFileSync(inventory, 'utf8'));
@@ -48,6 +55,11 @@ try {
   assert.throws(() => execFileSync(cli, ['client', '--profile', 'tool-cancellation-v1', '--exec', process.execPath, '--json', '--', join(pkg, 'dist/node/drivers/typescript-client.js')], { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
     const report = JSON.parse(error.stdout);
     return error.status === 1 && report.cases.some(c => c.id === 'client/cancellation/late-rejection' && c.status === 'incomplete');
+  });
+  writeFileSync(inventory, JSON.stringify(definitions.filter(s => s.id !== 'server/tool-stream/lifecycle')));
+  assert.throws(() => execFileSync(cli, streamArgs, { cwd: temp, encoding: 'utf8', stdio: 'pipe' }), error => {
+    const report = JSON.parse(error.stdout);
+    return error.status === 1 && report.cases.some(c => c.id === 'server/tool-stream/lifecycle' && c.status === 'incomplete');
   });
   console.log('Packed CLI passes client/server profile outside repository, no SDK installation required');
 } finally { rmSync(temp, { recursive: true, force: true }); }
