@@ -177,7 +177,7 @@ describe('server tools', () => {
     userTurn(fake);
     call(fake, 'r1', 'c1', 't');
     await flush();
-    expect(ofType('tool.preview')).toMatchObject([{ callId: 'c1', name: 't', preview: { step: 1 } }]);
+    expect(ofType('tool.preview')).toMatchObject([{ callId: expect.any(String), name: 't', preview: { step: 1 } }]);
   });
 });
 
@@ -218,8 +218,8 @@ describe('hooks', () => {
     fake.emit({ type: 'response.end', responseId: 'r2', status: 'done' });
     fake.emit({ type: 'error', error: new Error('x'), recoverable: true });
     expect(hooks.onTurnStart).toHaveBeenCalledTimes(1);
-    expect(hooks.onTranscript).toHaveBeenCalledWith('hello', true, expect.objectContaining({ id: 'turn-1' }));
-    expect(hooks.afterToolCall).toHaveBeenCalledWith(expect.objectContaining({ callId: 'c1', where: 'server' }), { ok: true, output: 'x' });
+    expect(hooks.onTranscript).toHaveBeenCalledWith('hello', true, expect.objectContaining({ id: expect.any(String) }));
+    expect(hooks.afterToolCall).toHaveBeenCalledWith(expect.objectContaining({ callId: expect.any(String), where: 'server' }), { ok: true, output: 'x' });
     expect(hooks.onTurnEnd).toHaveBeenCalledWith(expect.objectContaining({ interrupted: false }), { toolCalls: 1, timeToFirstToolCallMs: 120, timeToFirstAudioMs: 320 });
     expect(hooks.onError).toHaveBeenCalledWith(new Error('x'), true);
   });
@@ -425,9 +425,9 @@ describe('client tools', () => {
     call(fake, 'r1', 'c1', 'paint', { color: 'red' });
     await flush();
     const forwarded = ofType('tool.call')[0]!;
-    expect(forwarded).toMatchObject({ callId: 'c1', name: 'paint', arguments: { color: 'red' }, epoch: session.epoch });
-    session.submitClientToolResult('c1', { ok: true, output: 'painted' });
-    session.submitClientToolResult('c1', { ok: true, output: 'twice' });
+    expect(forwarded).toMatchObject({ callId: expect.any(String), name: 'paint', arguments: { color: 'red' }, epoch: session.epoch });
+    session.submitClientToolResult(forwarded.callId, { ok: true, output: 'painted' });
+    session.submitClientToolResult(forwarded.callId, { ok: true, output: 'twice' });
     expect(results(fake)).toEqual({ c1: 'painted' });
     expect(fake.commandsOf('submitToolResult')).toHaveLength(1);
   });

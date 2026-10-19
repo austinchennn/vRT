@@ -33,7 +33,7 @@ try {
   writeFileSync(join(dir, 'imports.mjs'), `
 const checks = {
   '@vrealtime/core': ['defineAgent', 'startSession', 'tool', 'AgentSession'],
-  '@vrealtime/protocol': ['decodeClientMessage', 'decodeServerMessage', 'encodeAudioFrame', 'Outbox', 'Inbox'],
+  '@vrealtime/protocol': ['decodeClientMessage', 'decodeServerMessage', 'encodeAudioFrame', 'Outbox', 'Inbox', 'GLOBAL_TOOL_IDS_V1'],
   '@vrealtime/openai-compatible': ['createCompatibleModel', 'fetchSocket'],
   '@vrealtime/boson': ['boson', 'fetchSocket'],
   '@vrealtime/openai': ['openai', 'openaiStt', 'openaiTts'],
@@ -56,9 +56,14 @@ for (const [entry, names] of Object.entries(checks)) {
 // A real round trip through the installed packages.
 const { defineAgent, startSession } = await import('@vrealtime/core');
 const { fakeModel } = await import('@vrealtime/testing');
-const session = await startSession(defineAgent({ model: fakeModel(), instructions: 'x' }));
+const agent = defineAgent({ model: fakeModel(), instructions: 'x' });
+const session = await startSession(agent);
 session.sendText('hi');
 if (session.state !== 'thinking') throw new Error('runtime did not start a turn');
+const another = await startSession(agent);
+another.sendText('hi');
+if (session.turn.id === another.turn.id) throw new Error('installed core reused a turn ID across sessions');
+await Promise.all([session.close(), another.close()]);
 console.log('imports ok: ' + Object.keys(checks).length + ' entry points');
 `);
   run(process.execPath, ['imports.mjs']);

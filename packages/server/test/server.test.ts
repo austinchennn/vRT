@@ -1,5 +1,5 @@
 import { defineAgent, tool, type AgentDefinition, type Tool } from '@vrealtime/core';
-import { PROTOCOL_VERSION, TOOL_STREAM_V1, TRANSIENT_TYPES, decodeAudioFrame, decodeServerMessage, encodeAudioFrame, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
+import { GLOBAL_TOOL_IDS_V1, PROTOCOL_VERSION, TOOL_STREAM_V1, TRANSIENT_TYPES, decodeAudioFrame, decodeServerMessage, encodeAudioFrame, type ClientMessage, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
 import { fakeModel, type FakeModel } from '@vrealtime/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Hub, attach, type AttachOptions, type WebSocketLike } from '../src/index.js';
@@ -62,6 +62,19 @@ async function ready(model: FakeModel, client: ReturnType<ReturnType<typeof setu
 const paint = { name: 'paint', description: 'paint', parameters: { type: 'object' } };
 
 describe('handshake', () => {
+  it('negotiates the global identifier guarantee and keeps it unchanged on resume', async () => {
+    const { model, connect, hub } = setup();
+    try {
+      const first = connect();
+      const { ready: r } = await ready(model, first, { capabilities: [GLOBAL_TOOL_IDS_V1] });
+      expect(r.capabilities).toEqual([GLOBAL_TOOL_IDS_V1]);
+      first.connection.closed();
+      const resumed = connect();
+      resumed.send({ type: 'hello', tools: [], sessionId: r.sessionId, resumeFrom: 0, capabilities: [] });
+      await flush();
+      expect(resumed.socket.ofType('ready')[0]).toMatchObject({ sessionId: r.sessionId, capabilities: [GLOBAL_TOOL_IDS_V1] });
+    } finally { await hub.close(); }
+  });
   it('starts a session on hello and replies ready with negotiated formats', async () => {
     const { model, connect, hub } = setup();
     const client = connect();
@@ -133,16 +146,16 @@ describe('tool streams (tool-stream-v1)', () => {
     fake.emit({ type: 'tool.call', responseId: 'r1', callId: 'c1', name: 'paint', arguments: { color: 'red' } });
     await flush();
     const call = client.socket.ofType('tool.call')[0]!;
-    client.send({ type: 'tool.result', callId: 'c1', epoch: call.epoch, ok: true, output: 'painted' });
-    return { fake, ready: r };
+    client.send({ type: 'tool.result', callId: call.callId, epoch: call.epoch, ok: true, output: 'painted' });
+    return { fake, ready: r, call };
   }
 
   it('reports each call as tool.stream, from start to its terminal phase, and never as tool.call.delta', async () => {
     const { model, connect } = setup();
     const client = connect();
-    const { ready: r } = await streamed(model, client, [TOOL_STREAM_V1]);
+    const { ready: r, call } = await streamed(model, client, [TOOL_STREAM_V1]);
     expect(r.capabilities).toEqual([TOOL_STREAM_V1]);
-    expect(streamOf(client.socket)).toEqual([['c1', 'start'], ['c1', 'arguments-delta'], ['c1', 'arguments-complete'], ['c1', 'settled']]);
+    expect(streamOf(client.socket)).toEqual([[call.callId, 'start'], [call.callId, 'arguments-delta'], [call.callId, 'arguments-complete'], [call.callId, 'settled']]);
     expect(client.socket.ofType('tool.stream')[1]).toMatchObject({ delta: '{"color":"red"}', turnId: expect.any(String) });
     expect(client.socket.ofType('tool.call.delta')).toEqual([]);
   });
@@ -150,9 +163,9 @@ describe('tool streams (tool-stream-v1)', () => {
   it('keeps the 1.0 preview for a client that does not offer it', async () => {
     const { model, connect } = setup();
     const client = connect();
-    await streamed(model, client, []);
+    const { call } = await streamed(model, client, []);
     expect(client.socket.ofType('tool.stream')).toEqual([]);
-    expect(client.socket.ofType('tool.call.delta')).toMatchObject([{ callId: 'c1', preview: { argumentsDelta: '{"color":"red"}' } }]);
+    expect(client.socket.ofType('tool.call.delta')).toMatchObject([{ callId: call.callId, preview: { argumentsDelta: '{"color":"red"}' } }]);
   });
 
   it("reports a server tool's progress and outcome, but never its output", async () => {
@@ -164,7 +177,8 @@ describe('tool streams (tool-stream-v1)', () => {
     fake.emit({ type: 'response.start', responseId: 'r1' });
     fake.emit({ type: 'tool.call', responseId: 'r1', callId: 's1', name: 'lookup', arguments: {} });
     await flush();
-    expect(streamOf(client.socket)).toEqual([['s1', 'start'], ['s1', 'arguments-complete'], ['s1', 'progress'], ['s1', 'settled']]);
+    const id = client.socket.ofType('tool.stream')[0]!.callId;
+    expect(streamOf(client.socket)).toEqual([[id, 'start'], [id, 'arguments-complete'], [id, 'progress'], [id, 'settled']]);
     expect(client.socket.ofType('tool.stream').at(-1)).toEqual(expect.objectContaining({ phase: 'settled', ok: true }));
     expect(JSON.stringify(client.socket.messages())).not.toContain('do-not-leak');
   });
@@ -181,8 +195,8 @@ describe('client tools', () => {
     fake.emit({ type: 'tool.call', responseId: 'r1', callId: 'c1', name: 'paint', arguments: { color: 'red' } });
     await flush();
     const call = client.socket.ofType('tool.call')[0]!;
-    expect(call).toMatchObject({ callId: 'c1', name: 'paint', arguments: { color: 'red' } });
-    client.send({ type: 'tool.result', callId: 'c1', epoch: call.epoch, ok: true, output: 'done' });
+    expect(call).toMatchObject({ callId: expect.any(String), name: 'paint', arguments: { color: 'red' } });
+    client.send({ type: 'tool.result', callId: call.callId, epoch: call.epoch, ok: true, output: 'done' });
     expect(fake.commandsOf('submitToolResult')).toEqual([{ type: 'submitToolResult', callId: 'c1', output: 'done', options: { respond: false } }]);
   });
 
@@ -215,7 +229,7 @@ describe('client tools', () => {
     fake.emit({ type: 'response.start', responseId: 'r1' });
     fake.emit({ type: 'tool.call', responseId: 'r1', callId: 'c1', name: 'paint', arguments: {} });
     await flush();
-    client.send({ type: 'tool.result', callId: 'c1', epoch: 1, ok: false, code: 'REJECTED', message: 'user said no' });
+    client.send({ type: 'tool.result', callId: client.socket.ofType('tool.call')[0]!.callId, epoch: 1, ok: false, code: 'REJECTED', message: 'user said no' });
     expect(fake.commandsOf('submitToolResult')[0]!.output).toEqual({ error: { code: 'REJECTED', message: 'user said no' } });
   });
 });
