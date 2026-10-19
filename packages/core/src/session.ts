@@ -378,7 +378,9 @@ export class AgentSession {
       const turn = this.#turn;
       if (epoch === undefined || !turn) return;
       const callId = this.#publicCallId(event.responseId, event.callId);
-      if (this.#calls.has(callId)) return; // Arguments are already complete, even if the stream tombstone was evicted.
+      // Issued calls keep their records until the response ends, even after a
+      // stream tombstone is evicted. No argument fragment may follow issuance.
+      if (this.#calls.has(callId)) return;
       this.#emitter.emit({ type: 'tool.call.delta', callId, epoch, name: event.name, argumentsDelta: event.argumentsDelta });
       this.#streams.delta({ callId, name: event.name, epoch, turnId: turn.id, responseId: event.responseId }, event.argumentsDelta);
     });

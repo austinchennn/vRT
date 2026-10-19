@@ -3,7 +3,8 @@ import { GLOBAL_TOOL_IDS_V1, TOOL_STREAM_V1 } from '@vrealtime/protocol';
 
 /**
  * A protocol capability (spec/capabilities.json) this server implements. It is
- * offered only when the agent's model can support it, e.g. argument streaming.
+ * offered only when the runtime and model support its contract. A lifecycle
+ * capability need not require argument fragments from the model.
  */
 export interface CapabilityRule {
   token: string;

@@ -224,6 +224,7 @@ session.interrupt();
 - 打断通知不等服务端：`interrupt()` 当场发出 `interrupted`（`source: 'local'`），UI 立即清理预览和播放；服务端随后对同一 epoch 的确认不再重复通知，服务端自己发起的打断（如插话）发出 `source: 'server'`。`npm run bench:latency -- --rtt 100` 下打断通知从约 103 ms（一个往返）降到约 0.01 ms。
 - 结构：`EpochGate`（epoch 状态）、`ToolHost`（排队、执行、恰好一个结果）、`ClientSession`（连接与编排）各管一件事。
 - 工具调用生命周期（能力 `tool-stream-v1`，spec §7.5）：`tool.stream` 报告每个调用（服务端或客户端）的 `start` → 参数片段 → `arguments-complete` → 进度 → 恰好一个终态（`settled` / `cancelled` / `failed`），供 UI 在模型还在生成参数时渲染预览。core 由 `ToolStreams` 统一保证顺序，服务端按协商结果发 `tool.stream` 或 1.0 的 `tool.call.delta`（不会两者都发），客户端由 `ToolStreamTracker` 按 epoch 过滤、本地打断即刻取消、终态去重，并继续派生 `tool.preview` 兼容旧代码。服务端工具的输出不会出现在线上。
+  - 实现职责、证据层级与资源边界见 [Tool-stream contract and evidence](TOOL_STREAM_CONTRACT.md)；该索引不等于完整兼容认证。
 - 零依赖。React 绑定放在 `@vrealtime/react`。
 
 ### 5.4 一致性测试套件
