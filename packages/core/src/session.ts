@@ -421,6 +421,7 @@ export class AgentSession {
       return;
     }
     if (event.status === 'failed' && response.calls.size === 0) {
+      this.#forgetResponse(event.responseId);
       this.#endTurn(false);
       return;
     }
