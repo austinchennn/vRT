@@ -8,9 +8,9 @@
     "dev": "wrangler dev"
   },
   "dependencies": {
-    "@vrealtime/boson": "0.1.0",
-    "@vrealtime/core": "0.1.0",
-    "@vrealtime/server": "0.1.0"
+    "@vrealtime/boson": "0.2.0",
+    "@vrealtime/core": "0.2.0",
+    "@vrealtime/server": "0.2.0"
   },
   "devDependencies": {
     "wrangler": "4.151.0"
