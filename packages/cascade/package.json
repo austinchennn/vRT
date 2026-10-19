@@ -1,6 +1,6 @@
 {
   "name": "@vrealtime/cascade",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "vRealTime cascade: speech-to-text + any text LLM + text-to-speech as one realtime model",
   "license": "Apache-2.0",
   "repository": {
@@ -40,6 +40,6 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@vrealtime/core": "0.1.0"
+    "@vrealtime/core": "0.2.0"
   }
 }
