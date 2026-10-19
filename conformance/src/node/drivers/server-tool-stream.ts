@@ -19,8 +19,8 @@ export async function streamServer(argumentStreaming = true) {
   } });
   const running = await serve(defineAgent({ model, instructions: '', tools: {
     probe: { description: 'Conformance server probe', parameters: { type: 'object' },
-      async run(_args, context) {
-        const effect = calls[context.callId]!; effect.started++; started.resolve();
+      async run(args, context) {
+        const effect = calls[(args as { fixtureId: string }).fixtureId]!; effect.started++; started.resolve();
         if (kind !== 'no-delta') context.emit({ step: 'working' });
         await release.promise;
         if (!context.signal.aborted) effect.committed++;
@@ -29,7 +29,7 @@ export async function streamServer(argumentStreaming = true) {
     },
   } }), { host: '127.0.0.1', port: 0, onListening: () => {} });
   const delta = (callId: string, argumentsDelta: string) => model.session.emit({ type: 'tool.call.delta', responseId, callId, name: 'probe', argumentsDelta });
-  const complete = (callId: string) => model.session.emit({ type: 'tool.call', responseId, callId, name: 'probe', arguments: { value: 1 } });
+  const complete = (callId: string) => model.session.emit({ type: 'tool.call', responseId, callId, name: 'probe', arguments: { value: 1, fixtureId: callId } });
   let closing: Promise<void> | undefined;
   async function close(): Promise<void> {
     return closing ??= (async () => { const shutdown = running.close(); release.resolve(); await shutdown; await setImmediate(); })();
@@ -42,7 +42,7 @@ export async function streamServer(argumentStreaming = true) {
       model.session.emit({ type: 'response.start', responseId });
       if (kind !== 'no-delta') {
         for (const id of ids) delta(id, '{"value":');
-        for (const id of ids) delta(id, '1}');
+        for (const id of ids) delta(id, `1,"fixtureId":${JSON.stringify(id)}}`);
       }
       return {};
     }

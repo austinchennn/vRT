@@ -13,6 +13,13 @@
           "tool.stream"
         ]
       }
+    },
+    {
+      "token": "global-tool-ids-v1",
+      "status": "draft",
+      "since": "1.3",
+      "summary": "Turn and tool-call identifiers are unique across sessions and remain unchanged on resume and replay.",
+      "specification": "protocol.md#63-cross-session-identifiers-global-tool-ids-v1"
     }
   ]
 }

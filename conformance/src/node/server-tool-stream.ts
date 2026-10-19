@@ -16,6 +16,13 @@ export async function serverToolStream(
   const baseline = kind === 'baseline';
   const ids = kind === 'lifecycle' ? ['stream-a', 'stream-b'] : ['stream-a'];
   let capabilities: string[] = [];
+  let wireIds: string[] = [];
+  function checkStreams(final: boolean) {
+    // Fixture labels identify application effects; opaque wire identities are learned independently.
+    wireIds = [...new Set(peer.messages.filter(m => ['tool.stream', 'tool.call.delta', 'tool.call'].includes(m.type)).map(m => m.callId as string))];
+    if (wireIds.length > ids.length || (final && wireIds.length !== ids.length)) throw new Error('Unexpected number of fixture calls');
+    return oracle.streams(peer.messages, capabilities, wireIds, final);
+  }
   async function fence(label: string): Promise<void> {
     stage(label); const offset = peer.messages.length;
     peer.send({ v: 1, seq: 0, type: 'ping' });
@@ -33,7 +40,7 @@ export async function serverToolStream(
     stage('begin parameter stream');
     await driver.request('beginStream', { kind, callIds: ids }, end);
     await fence('parameter wire fence');
-    oracle.streams(peer.messages, capabilities, ids, false);
+    checkStreams(false);
     const before = await driver.request('readStreamEffects', {}, end);
     if (ids.some(id => before.calls?.[id]?.started !== 0 || before.calls?.[id]?.committed !== 0)) throw new Error(`Missing/nonzero effects during partial arguments: ${JSON.stringify(before)}`);
     if (!baseline && kind !== 'no-delta' && !peer.messages.some(m => m.type === 'tool.stream' && m.phase === 'arguments-delta')) throw new Error('Fixture did not produce required argument fragments');
@@ -48,21 +55,21 @@ export async function serverToolStream(
       stage('complete arguments'); await driver.request('completeStream', {}, end);
       stage('tool blocked before commit'); await driver.request('waitStreamTool', {}, end);
       await fence('progress wire fence');
-      oracle.streams(peer.messages, capabilities, ids, false);
+      checkStreams(false);
       const held = await driver.request('readStreamEffects', {}, end);
       if (held.calls?.[ids[0]!]?.started !== 1 || ids.some(id => held.calls?.[id]?.committed !== 0)) throw new Error(`Expected first tool held before commit: ${JSON.stringify(held)}`);
     }
     stage('drain scenario work'); const effects = await driver.request('finishStream', {}, end);
     // Still live: do not invoke the session-ended exception to excuse missing terminals.
     await fence('live completion fence');
-    const calls = oracle.streams(peer.messages, capabilities, ids, !baseline);
+    const calls = checkStreams(!baseline);
     const executes = kind !== 'failed' && kind !== 'cancelled';
     for (const callId of ids) {
       const effect = effects.calls?.[callId];
       const count = executes ? 1 : 0;
       if (!effect || effect.started !== count || effect.committed !== count) throw new Error(`Unexpected tool effects for ${callId}: ${JSON.stringify(effect)}`);
       if (!baseline) {
-        const steps = calls.get(callId)!;
+        const steps = calls.get(wireIds[ids.indexOf(callId)]!)!;
         const terminal = steps.at(-1)!;
         const expected = kind === 'failed' ? 'failed' : kind === 'cancelled' ? 'cancelled' : 'settled';
         if (terminal.phase !== expected || (expected === 'settled' && terminal.ok !== true)) throw new Error(`Expected ${expected} terminal`);
@@ -71,11 +78,11 @@ export async function serverToolStream(
       }
     }
     stage('stream close fence'); peer.socket.close(1000, 'scenario complete'); await peer.closed(end);
-    oracle.streams(peer.messages, capabilities, ids, !baseline);
-    return { capabilities, effects, calls: Object.fromEntries([...calls].map(([key, steps]) => [key, steps.map(m => m.phase)])), liveCompletionFence: true };
+    checkStreams(!baseline);
+    return { capabilities, effects, calls: Object.fromEntries([...calls].map(([key, steps]) => [ids[wireIds.indexOf(key)]!, steps.map(m => m.phase)])), wireCallIds: wireIds, liveCompletionFence: true };
   } catch (error) {
     // A valid prefix ending early is incomplete, not a missing-terminal wire violation.
-    oracle.streams(peer.messages, capabilities, ids, false);
+    checkStreams(false);
     if (peer.closeInfo) throw new IncompleteStream(`Connection ended before scenario completion; session completion unobserved: ${String(error)}`);
     throw error;
   }

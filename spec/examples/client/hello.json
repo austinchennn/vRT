@@ -4,6 +4,7 @@
   "direction": "client",
   "description": "The hello message (protocol.md §5).",
   "cases": [
+    { "id": "client/hello/global-tool-ids", "description": "Offer cross-session turn and tool identifiers independently of tool streams.", "valid": true, "message": { "v": 1, "seq": 0, "type": "hello", "tools": [], "capabilities": ["global-tool-ids-v1"] } },
     { "id": "client/hello/minimal", "description": "A text-only client with no tools.", "valid": true, "message": { "v": 1, "seq": 0, "type": "hello", "tools": [] } },
     {
       "id": "client/hello/full",

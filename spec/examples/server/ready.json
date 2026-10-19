@@ -4,6 +4,7 @@
   "direction": "server",
   "description": "The ready message (protocol.md §5).",
   "cases": [
+    { "id": "server/ready/global-tool-ids", "description": "Confirm the cross-session identifier guarantee for this session.", "valid": true, "message": { "v": 1, "seq": 0, "type": "ready", "sessionId": "s", "input": { "encoding": "pcm16" }, "output": { "encoding": "pcm16" }, "capabilities": ["global-tool-ids-v1"] } },
     { "id": "server/ready/new", "description": "A new session.", "valid": true, "message": { "v": 1, "seq": 0, "type": "ready", "sessionId": "8c1e2f6a", "input": { "encoding": "pcm16", "sampleRate": 24000 }, "output": { "encoding": "pcm16", "sampleRate": 24000 } } },
     { "id": "server/ready/resumed", "description": "A resumed session.", "valid": true, "message": { "v": 1, "seq": 0, "type": "ready", "sessionId": "8c1e2f6a", "input": { "encoding": "opus" }, "output": { "encoding": "pcmu" }, "resumedFrom": 17 } },
     { "id": "server/ready/capabilities", "description": "Capabilities in effect for the session.", "valid": true, "message": { "v": 1, "seq": 0, "type": "ready", "sessionId": "s", "input": { "encoding": "pcm16" }, "output": { "encoding": "pcm16" }, "capabilities": ["tool-stream-v1"] } },
