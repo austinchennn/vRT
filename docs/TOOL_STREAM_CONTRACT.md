@@ -78,9 +78,10 @@ a universal safe point for discarding application idempotency records.
 - [#57](https://github.com/austinchennn/vRT/issues/57): §3.3's final “no capabilities”
   paragraph contradicts §7.5 and the registry. This audit follows the explicit gates
   and reports the conflict; it does not silently amend normative text or shared vectors.
-- [#56](https://github.com/austinchennn/vRT/issues/56) proposes cross-session identifiers.
-  Current §7.1 requires callId uniqueness within a session, not global uniqueness.
-  Global IDs/provider mapping are a separate contract decision, not implemented here.
+- [#56](https://github.com/austinchennn/vRT/issues/56) cross-session identifiers are a
+  separate contract: the draft `global-tool-ids-v1` capability and provider-ID mapping
+  ([GLOBAL_IDENTIFIERS.md](GLOBAL_IDENTIFIERS.md)). Tool streams carry the public `callId`;
+  this audit does not depend on that capability being negotiated.
 - [#50](https://github.com/austinchennn/vRT/issues/50) owns additional independent client
   observation/cancellation/replay testing. The existing SDK e2e is not a replacement.
 - `tool-stream-v1` stays **draft**. [The promotion process](../spec/README.md#adding-a-capability)

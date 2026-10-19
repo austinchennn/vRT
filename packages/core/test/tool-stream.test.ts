@@ -113,8 +113,9 @@ describe('tool streams in a session', () => {
     fake.emit({ type: 'tool.call.delta', responseId: 'r1', callId: 'c1', name: 'search', argumentsDelta: '"x"}' });
     fake.emit({ type: 'tool.call', responseId: 'r1', callId: 'c1', name: 'search', arguments: { q: 'x' } });
     await flush();
-    expect(phases(events)).toEqual({ c1: ['start', 'arguments-delta', 'arguments-delta', 'arguments-complete', 'progress', 'settled'] });
-    expect(events[0]).toMatchObject({ callId: 'c1', name: 'search', turnId: expect.any(String), epoch: expect.any(Number) });
+    expect(phases(events)).toEqual({ [events[0]!.callId]: ['start', 'arguments-delta', 'arguments-delta', 'arguments-complete', 'progress', 'settled'] });
+    expect(events[0]!.callId).not.toBe('c1');
+    expect(events[0]).toMatchObject({ name: 'search', turnId: expect.any(String), epoch: expect.any(Number) });
     expect(events.at(-1)).toMatchObject({ phase: 'settled', result: { ok: true, output: 'ok' } });
     expectWellFormed(events);
   });
@@ -125,20 +126,23 @@ describe('tool streams in a session', () => {
     try {
       respond(fake);
       for (let i = 0; i < 257; i++) {
-        const callId = `c${i}`;
+        // Calls run one at a time, so the next settled event is this call's.
         const settled = new Promise<void>((resolve) => {
           const off = session.on('tool.stream', (event) => {
-            if (event.callId === callId && event.phase === 'settled') { off(); resolve(); }
+            if (event.phase === 'settled') { off(); resolve(); }
           });
         });
-        fake.emit({ type: 'tool.call', responseId: 'r1', callId, name: 'probe', arguments: {} });
+        fake.emit({ type: 'tool.call', responseId: 'r1', callId: `c${i}`, name: 'probe', arguments: {} });
         await settled;
       }
+      const first = events[0]!.callId;
       fake.emit({ type: 'tool.call.delta', responseId: 'r1', callId: 'c0', name: 'probe', argumentsDelta: 'late' });
-      expect(phases(events).c0).toEqual(['start', 'arguments-complete', 'settled']);
+      expect(phases(events)[first]).toEqual(['start', 'arguments-complete', 'settled']);
       // The response is still live: a distinct collecting call must not be suppressed.
       fake.emit({ type: 'tool.call.delta', responseId: 'r1', callId: 'fresh', name: 'probe', argumentsDelta: '{' });
-      expect(phases(events).fresh).toEqual(['start', 'arguments-delta']);
+      const fresh = events.at(-1)!.callId;
+      expect(fresh).not.toBe(first);
+      expect(phases(events)[fresh]).toEqual(['start', 'arguments-delta']);
     } finally {
       await session.close();
     }
@@ -149,8 +153,8 @@ describe('tool streams in a session', () => {
     respond(fake);
     fake.emit({ type: 'tool.call', responseId: 'r1', callId: 'c1', name: 'paint', arguments: { color: 'red' } });
     await flush();
-    session.submitClientToolResult('c1', { ok: true, output: 'painted' });
-    expect(phases(events)).toEqual({ c1: ['start', 'arguments-complete', 'settled'] });
+    session.submitClientToolResult(events[0]!.callId, { ok: true, output: 'painted' });
+    expect(phases(events)).toEqual({ [events[0]!.callId]: ['start', 'arguments-complete', 'settled'] });
     expect(events[1]).toMatchObject({ phase: 'arguments-complete', arguments: { color: 'red' } });
   });
 
@@ -162,7 +166,7 @@ describe('tool streams in a session', () => {
     fake.emit({ type: 'tool.call.delta', responseId: 'r1', callId: 'c1', name: 'paint', argumentsDelta: 'lor"}' });
     fake.emit({ type: 'tool.call', responseId: 'r1', callId: 'c1', name: 'paint', arguments: { color: 'x' } });
     await flush();
-    expect(phases(events)).toEqual({ c1: ['start', 'arguments-delta', 'cancelled'] });
+    expect(phases(events)).toEqual({ [events[0]!.callId]: ['start', 'arguments-delta', 'cancelled'] });
   });
 
   it('cancels an issued call when its turn is interrupted, and ignores its late result', async () => {
@@ -171,8 +175,8 @@ describe('tool streams in a session', () => {
     fake.emit({ type: 'tool.call', responseId: 'r1', callId: 'c1', name: 'paint', arguments: {} });
     await flush();
     session.interrupt('user');
-    session.submitClientToolResult('c1', { ok: true, output: 'too late' });
-    expect(phases(events)).toEqual({ c1: ['start', 'arguments-complete', 'cancelled'] });
+    session.submitClientToolResult(events[0]!.callId, { ok: true, output: 'too late' });
+    expect(phases(events)).toEqual({ [events[0]!.callId]: ['start', 'arguments-complete', 'cancelled'] });
   });
 
   it('fails a call whose response ends before its arguments are complete', async () => {
@@ -180,7 +184,7 @@ describe('tool streams in a session', () => {
     respond(fake);
     fake.emit({ type: 'tool.call.delta', responseId: 'r1', callId: 'c1', name: 'paint', argumentsDelta: '{"color":' });
     fake.emit({ type: 'response.end', responseId: 'r1', status: 'failed' });
-    expect(phases(events)).toEqual({ c1: ['start', 'arguments-delta', 'failed'] });
+    expect(phases(events)).toEqual({ [events[0]!.callId]: ['start', 'arguments-delta', 'failed'] });
   });
 
   it('settles a rejected call with its failure code', async () => {
@@ -199,10 +203,10 @@ describe('tool streams in a session', () => {
     fake.emit({ type: 'tool.call', responseId: 'r1', callId: 'c1', name: 'send', arguments: {} });
     await flush();
     session.interrupt('user');
-    expect(phases(events)).toEqual({ c1: ['start', 'arguments-complete'] });
+    expect(phases(events)).toEqual({ [events[0]!.callId]: ['start', 'arguments-complete'] });
     finish('sent');
     await flush();
-    expect(phases(events)).toEqual({ c1: ['start', 'arguments-complete', 'settled'] });
+    expect(phases(events)).toEqual({ [events[0]!.callId]: ['start', 'arguments-complete', 'settled'] });
   });
 
   it('emits nothing more once the session closes', async () => {

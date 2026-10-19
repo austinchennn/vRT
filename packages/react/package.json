@@ -1,6 +1,6 @@
 {
   "name": "@vrealtime/react",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "React hooks for the vRealTime client",
   "license": "Apache-2.0",
   "repository": {
@@ -40,8 +40,8 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@vrealtime/client": "0.1.0",
-    "@vrealtime/protocol": "0.1.0"
+    "@vrealtime/client": "0.2.0",
+    "@vrealtime/protocol": "0.2.0"
   },
   "peerDependencies": {
     "react": ">=18.0.0"

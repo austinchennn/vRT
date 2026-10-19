@@ -90,7 +90,7 @@ describe('M0 end to end', () => {
     running = await serve(defineAgent({ model, instructions: 'test', clientTools: 'accept' }), { port: 0, clock: model.clock, onListening: () => {} });
     let color = 'initial';
     const session = await connect(running.url.replace('http', 'ws'), { tools: { set_accent_color: accentColorTool((c: string) => { color = c; }) } });
-    expect([...session.capabilities]).toEqual(['tool-stream-v1']);
+    expect([...session.capabilities]).toEqual(['tool-stream-v1', 'global-tool-ids-v1']);
     const steps: string[] = [];
     session.on('tool.stream', (e) => steps.push(e.phase));
 

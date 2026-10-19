@@ -1,5 +1,5 @@
 import type { Capabilities } from '@vrealtime/core';
-import { TOOL_STREAM_V1 } from '@vrealtime/protocol';
+import { GLOBAL_TOOL_IDS_V1, TOOL_STREAM_V1 } from '@vrealtime/protocol';
 
 /**
  * A protocol capability (spec/capabilities.json) this server implements. It is
@@ -15,6 +15,7 @@ export interface CapabilityRule {
 export const CAPABILITY_RULES: readonly CapabilityRule[] = [
   // Any model: without argument streaming a call goes straight from start to arguments-complete.
   { token: TOOL_STREAM_V1, available: () => true },
+  { token: GLOBAL_TOOL_IDS_V1, available: () => true },
 ];
 
 /** The tokens sessions of an agent with this model may negotiate. */

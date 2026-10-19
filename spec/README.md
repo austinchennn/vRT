@@ -9,7 +9,7 @@ This directory is the single source of truth for the vRT wire protocol. Every im
 | [`examples/`](examples/) | Test vectors: valid and invalid control messages, and binary audio frames, with expected outcomes. |
 | [`capabilities.json`](capabilities.json) | The capability registry: every standard optional feature and the messages it gates. |
 
-Protocol version 1, revision 1.2. See [Appendix B](protocol.md#appendix-b-revision-history) for the history.
+Protocol version 1, revision 1.3. See [Appendix B](protocol.md#appendix-b-revision-history) for the history.
 
 ## Versioning in one paragraph
 

@@ -1,6 +1,6 @@
 {
   "name": "@vrealtime/openai-compatible",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Internal base for OpenAI-Realtime-compatible vRealTime adapters",
   "license": "Apache-2.0",
   "repository": {
@@ -40,6 +40,6 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@vrealtime/core": "0.1.0"
+    "@vrealtime/core": "0.2.0"
   }
 }

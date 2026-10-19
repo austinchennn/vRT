@@ -73,6 +73,7 @@ const FINISHED_RESPONSES_KEPT = 64;
 
 interface CallRecord {
   callId: string;
+  providerCallId: string;
   name: string;
   args: unknown;
   epoch: number;
@@ -145,6 +146,8 @@ export class AgentSession {
   readonly #finished = new Set<string>();
 
   readonly #calls = new Map<string, CallRecord>();
+  /** Provider identifiers are scoped to a response; public identities never expose or reuse them. */
+  readonly #callIds = new Map<string, Map<string, string>>();
   readonly #queue: CallRecord[] = [];
   #pumping = false;
   readonly #streams: ToolStreams;
@@ -313,6 +316,7 @@ export class AgentSession {
     }
     this.#queue.length = 0;
     this.#streams.clear();
+    this.#callIds.clear();
     for (const off of this.#unsubscribe) off();
     await this.#model.close();
     this.#emitter.emit({ type: 'closed' });
@@ -372,11 +376,13 @@ export class AgentSession {
     on('tool.call.delta', (event) => {
       const epoch = this.#liveEpoch(event.responseId);
       const turn = this.#turn;
+      if (epoch === undefined || !turn) return;
+      const callId = this.#publicCallId(event.responseId, event.callId);
       // Issued calls keep their records until the response ends, even after a
       // stream tombstone is evicted. No argument fragment may follow issuance.
-      if (epoch === undefined || !turn || this.#calls.has(event.callId)) return;
-      this.#emitter.emit({ type: 'tool.call.delta', callId: event.callId, epoch, name: event.name, argumentsDelta: event.argumentsDelta });
-      this.#streams.delta({ callId: event.callId, name: event.name, epoch, turnId: turn.id, responseId: event.responseId }, event.argumentsDelta);
+      if (this.#calls.has(callId)) return;
+      this.#emitter.emit({ type: 'tool.call.delta', callId, epoch, name: event.name, argumentsDelta: event.argumentsDelta });
+      this.#streams.delta({ callId, name: event.name, epoch, turnId: turn.id, responseId: event.responseId }, event.argumentsDelta);
     });
     on('tool.call', (event) => this.#onToolCall(event));
     on('response.end', (event) => {
@@ -417,6 +423,7 @@ export class AgentSession {
       return;
     }
     if (event.status === 'failed' && response.calls.size === 0) {
+      this.#forgetResponse(event.responseId);
       this.#endTurn(false);
       return;
     }
@@ -427,9 +434,12 @@ export class AgentSession {
     const response = this.#responses.get(event.responseId);
     const epoch = response?.epoch ?? (this.#finished.has(event.responseId) ? -1 : this.#epoch);
     const where = this.#serverTools.has(event.name) ? 'server' : 'client';
+    const callId = response ? this.#publicCallId(event.responseId, event.callId) : `call-${crypto.randomUUID()}`;
+    if (this.#calls.has(callId)) return;
     const turn = this.#ensureTurn('acting');
     const record: CallRecord = {
-      callId: event.callId,
+      callId,
+      providerCallId: event.callId,
       name: event.name,
       args: event.arguments,
       epoch,
@@ -556,7 +566,7 @@ export class AgentSession {
     if (record.timer !== undefined) this.#clock.clearTimeout(record.timer);
     const live = record.epoch === this.#epoch;
     const idle = this.#turn === undefined;
-    this.#model.submitToolResult(record.callId, toModelOutput(result), { respond: false });
+    this.#model.submitToolResult(record.providerCallId, toModelOutput(result), { respond: false });
     this.#emitter.emit({ type: 'tool.result', callId: record.callId, epoch: record.epoch, name: record.name, result });
     this.#streams.settle(record.callId, result);
     if (record.responseId === undefined || !this.#responses.has(record.responseId)) this.#calls.delete(record.callId);
@@ -591,6 +601,7 @@ export class AgentSession {
   }
 
   #forgetResponse(responseId: string): void {
+    this.#callIds.delete(responseId);
     const response = this.#responses.get(responseId);
     if (!response) return;
     for (const callId of response.calls) {
@@ -604,6 +615,14 @@ export class AgentSession {
 
   // ── Turns, transcript, truncation ───────────────────────────────────────
 
+  #publicCallId(responseId: string, providerCallId: string): string {
+    let ids = this.#callIds.get(responseId);
+    if (!ids) { ids = new Map(); this.#callIds.set(responseId, ids); }
+    let id = ids.get(providerCallId);
+    if (!id) { id = `call-${crypto.randomUUID()}`; ids.set(providerCallId, id); }
+    return id;
+  }
+
   #ensureTurn(state: TurnState): Turn {
     if (this.#turn) {
       if (this.#turn.state !== state) this.#setState(state);
@@ -613,7 +632,7 @@ export class AgentSession {
     this.#turnCount++;
     this.#turnStartedAt = this.#clock.now();
     this.#metrics = { toolCalls: 0 };
-    this.#turn = { id: `turn-${this.#turnCount}`, epoch: this.#epoch, state, interrupted: false, startedAt: this.#turnStartedAt };
+    this.#turn = { id: `turn-${crypto.randomUUID()}`, epoch: this.#epoch, state, interrupted: false, startedAt: this.#turnStartedAt };
     const turn = this.#turn;
     this.#hook(() => this.agent.hooks?.onTurnStart?.(turn));
     this.#emitState();

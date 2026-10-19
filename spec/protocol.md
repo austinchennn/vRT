@@ -1,6 +1,6 @@
 # vRT protocol, version 1
 
-Revision 1.2, 2026-10-16. Status: draft until the conformance suite (`conformance/`) ships.
+Revision 1.3, 2026-10-19. Status: draft until the conformance suite (`conformance/`) ships.
 
 This document defines the vRealTime (vRT) wire protocol between a **client** (an app or device that hosts tools and, optionally, audio input and output) and a **server** (which runs the agent and talks to the model). It is normative together with the JSON Schemas in [`schema/`](schema/). Where this document and a schema disagree about the structure of a message, the schema wins; this document defines everything a schema cannot: ordering, state and behaviour.
 
@@ -93,7 +93,7 @@ A capability names an optional feature. Tokens are lowercase ASCII words separat
 4. A peer MUST NOT send any message, member value or behaviour that a capability gates unless that capability is in effect.
 5. Receivers MUST ignore capability tokens they do not recognise.
 
-The registry (§3.4) lists no capabilities in this revision: every behaviour in this document is baseline and always in effect.
+The registry (§3.4) lists the optional capabilities. Only their explicitly gated behaviours require negotiation; all other behaviours in this document are baseline.
 
 ### 3.4 Capability registry
 
@@ -291,6 +291,18 @@ and then send `interrupt` with that epoch and a `reason`: `speech` (local voice 
 
 A client `text` message is user input, like speech. If a response is in flight, the server first interrupts it as in §6.2 (reason `user`), then responds to the text.
 
+### 6.3 Cross-session identifiers (`global-tool-ids-v1`)
+
+This section applies only when `global-tool-ids-v1` is in effect (§3.3). It strengthens identifier scope without changing the baseline session-scoped rules or message shapes.
+
+- A server MUST assign each new turn a `turnId` that does not identify a different turn in any other session, including after process restart or on a different server instance. A collision-resistant random identifier with at least 122 random bits is RECOMMENDED.
+- A server MUST assign each distinct tool call a `callId` that does not identify a different call in any session. Model-provider identifiers MUST be translated when their uniqueness does not meet this requirement. A new call in a later response MUST receive a new public identifier even when the model reuses its own identifier.
+- Every message for a call MUST use its same public `callId` and, where present, issuing `turnId`; this includes previews and negotiated tool streams. A client MUST echo the public `callId` in `tool.result`. Translating back to a provider identifier is the server's responsibility.
+- Resuming a session and replaying an existing message MUST preserve both identifiers byte for byte. A retransmission is the same call, not a new call. A server MUST NOT accept a previous call's late result as a result for a later call.
+- Identifiers remain opaque (§11); clients MUST NOT parse a prefix or infer a session, provider or counter from them. Uniqueness is not an authorization token, a guarantee of durable deduplication, or permission to execute a preview.
+
+This capability introduces no message types, members, enumeration values or client-side requirement to detect identifier reuse. Without negotiation the baseline rules still apply. Implementations MAY always generate stronger identifiers; the reference SDK does so even for baseline peers. Clients can test `ready.capabilities` before removing any compatibility mapping they need for older servers.
+
 ## 7. Tools
 
 ### 7.1 Calls
@@ -483,6 +495,11 @@ This version sets no maximum message size, tool count or queue length. Implement
 | server | `error` | sessionless | Something went wrong | [error](schema/server/error.json) |
 
 ## Appendix B. Revision history
+
+**1.3** (2026-10-19)
+
+- Added optional `global-tool-ids-v1` (§6.3), a cross-session scope and replay-preservation guarantee for turn and tool-call identifiers; baseline peers retain the existing rules and message shapes.
+- Corrected obsolete introductory prose in §3.3 to refer to the existing capability registry.
 
 **1.2** (2026-10-16)
 

@@ -1,4 +1,4 @@
-import { TOOL_STREAM_V1, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
+import { GLOBAL_TOOL_IDS_V1, TOOL_STREAM_V1, type ServerMessage, type Unsequenced } from '@vrealtime/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EpochGate } from '../src/epoch-gate.js';
 import { connect, type ClientEvent } from '../src/index.js';
@@ -69,9 +69,16 @@ describe('tool streams in a session', () => {
     return { session, socket, events, send };
   }
 
-  it('offers tool-stream-v1 in hello', async () => {
+  it('offers stream and global-ID capabilities while accepting an older server', async () => {
     await start([TOOL_STREAM_V1]);
-    expect(latest().ofType('hello')[0]).toMatchObject({ capabilities: [TOOL_STREAM_V1] });
+    expect(latest().ofType('hello')[0]).toMatchObject({ capabilities: [TOOL_STREAM_V1, GLOBAL_TOOL_IDS_V1] });
+  });
+
+  it('exposes the cross-session identifier guarantee only when negotiated', async () => {
+    const { session } = await start([GLOBAL_TOOL_IDS_V1]);
+    expect(session.capabilities.has(GLOBAL_TOOL_IDS_V1)).toBe(true);
+    expect(session.capabilities.has(TOOL_STREAM_V1)).toBe(false);
+    await session.close();
   });
 
   it('reports the lifecycle, and the 1.0 preview for fragments and progress', async () => {
