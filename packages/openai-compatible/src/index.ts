@@ -4,6 +4,7 @@
  * capabilities and their extension events; everything else lives here.
  */
 import {
+  BoundedMap,
   BoundedSet,
   Emitter,
   Pcm16Resampler,
@@ -107,8 +108,11 @@ export const OPENAI_ERROR_TYPES: Readonly<Record<string, RealtimeErrorCode>> = {
 
 /** One provider `input_audio_buffer.append` must stay under 1 MiB; base64 grows 4/3, so cap raw bytes (even, for PCM16). */
 export const MAX_APPEND_BYTES = 785_408;
-/** Recent user items whose final transcript was emitted; a repeat `completed` for one of them is dropped. */
-export const FINAL_TRANSCRIPT_MEMORY = 64;
+/**
+ * User items remembered per session for transcription: partial text still being
+ * streamed, and items whose final transcript was emitted (a repeat `completed` is dropped).
+ */
+export const TRANSCRIPT_MEMORY = 64;
 const OPEN = 1;
 const DEFAULT_FORMAT: AudioFormat = { encoding: 'pcm16', sampleRate: 24000, channels: 1 };
 
@@ -196,8 +200,9 @@ export class CompatibleSession implements RealtimeSession {
   /** A session-limit event the provider sent; the normal close after it is a `session_limit`. */
   #sessionLimit: string | undefined;
   readonly #callNames = new Map<string, string>();
-  readonly #userTranscripts = new Map<string, string>();
-  readonly #finalTranscripts = new BoundedSet<string>(FINAL_TRANSCRIPT_MEMORY);
+  /** Partial user transcripts by item; a transcription that fails or never completes cannot pin them. */
+  readonly #userTranscripts = new BoundedMap<string, string>(TRANSCRIPT_MEMORY);
+  readonly #finalTranscripts = new BoundedSet<string>(TRANSCRIPT_MEMORY);
 
   constructor(socket: ProviderSocket, config: SessionConfig, options: CompatibleOptions) {
     this.#socket = socket;
@@ -351,6 +356,14 @@ export class CompatibleSession implements RealtimeSession {
         if (this.#finalTranscripts.has(itemId)) return;
         this.#finalTranscripts.add(itemId);
         this.#emit({ type: 'input.transcript', itemId, text: message['transcript'] ?? '', final: true });
+        return;
+      }
+      case 'conversation.item.input_audio_transcription.failed': {
+        // No final transcript follows; the conversation itself goes on.
+        const detail = message['error'] ?? {};
+        this.#userTranscripts.delete(message['item_id']);
+        const error = this.#error('transcription', detail.message ?? 'Transcription failed', detail.code ?? detail.type, message);
+        this.#emit({ type: 'error', error, recoverable: true });
         return;
       }
       case 'response.created':

@@ -1,5 +1,6 @@
 import type { RealtimeEvent } from '@vrealtime/core';
 import { toBase64 } from '@vrealtime/core';
+import { TRANSCRIPT_MEMORY } from '@vrealtime/openai-compatible';
 import { describe, expect, it } from 'vitest';
 import { OPENAI_CAPABILITIES, openai, type ProviderSocket } from '../src/index.js';
 
@@ -100,6 +101,38 @@ describe('openai', () => {
       { type: 'input.transcript', itemId: 'u', text: 'make it red', final: false },
       { type: 'input.transcript', itemId: 'u', text: 'make it red', final: true },
     ]);
+  });
+
+  it('reports a failed transcription and drops its partial text', async () => {
+    const { socket, session } = await connect();
+    const seen: RealtimeEvent[] = [];
+    session.on('input.transcript', (e) => seen.push(e));
+    session.on('error', (e) => seen.push(e));
+    socket.server({ type: 'conversation.item.input_audio_transcription.delta', item_id: 'u', delta: 'make it ' });
+    socket.server({
+      type: 'conversation.item.input_audio_transcription.failed',
+      item_id: 'u',
+      content_index: 0,
+      error: { type: 'transcription_error', code: 'audio_unintelligible', message: 'Audio could not be transcribed', param: null },
+    });
+    socket.server({ type: 'conversation.item.input_audio_transcription.delta', item_id: 'u', delta: 'again' });
+    expect(seen).toMatchObject([
+      { type: 'input.transcript', itemId: 'u', text: 'make it ', final: false },
+      { type: 'error', recoverable: true, error: { name: 'RealtimeError', code: 'transcription', provider: 'openai', providerCode: 'audio_unintelligible', retryable: false } },
+      { type: 'input.transcript', itemId: 'u', text: 'again', final: false },
+    ]);
+  });
+
+  it('bounds partial transcripts that never complete', async () => {
+    const { socket, session } = await connect();
+    const texts = new Map<string, string>();
+    session.on('input.transcript', (e) => texts.set(e.itemId, e.text));
+    const delta = (itemId: string, text: string) => socket.server({ type: 'conversation.item.input_audio_transcription.delta', item_id: itemId, delta: text });
+    for (let i = 0; i <= TRANSCRIPT_MEMORY; i++) delta(`u${i}`, 'a');
+    delta('u0', 'b');
+    delta(`u${TRANSCRIPT_MEMORY}`, 'b');
+    expect(texts.get('u0')).toBe('b');
+    expect(texts.get(`u${TRANSCRIPT_MEMORY}`)).toBe('ab');
   });
 
   it('declares no Opus and no auto-reply after tool results', () => {

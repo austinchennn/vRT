@@ -2,7 +2,7 @@ import type { RealtimeError, RealtimeEvent, RealtimeSession } from '@vrealtime/c
 import { fromBase64, isRealtimeError, toBase64 } from '@vrealtime/core';
 import { describe, expect, it } from 'vitest';
 import { BOSON_REALTIME_URL, boson, type ProviderSocket } from '../src/index.js';
-import { FINAL_TRANSCRIPT_MEMORY, MAX_APPEND_BYTES } from '@vrealtime/openai-compatible';
+import { TRANSCRIPT_MEMORY, MAX_APPEND_BYTES } from '@vrealtime/openai-compatible';
 
 type Listener = (event: { data?: unknown; code?: number; reason?: string }) => void;
 
@@ -257,10 +257,10 @@ describe('boson events', () => {
       { type: 'input.transcript', itemId: 'u2', text: 'What is my name?', final: true },
     ]);
     // Memory is bounded: only the most recent items are remembered.
-    for (let i = 0; i < FINAL_TRANSCRIPT_MEMORY; i++) completed(`x${i}`, 'x');
+    for (let i = 0; i < TRANSCRIPT_MEMORY; i++) completed(`x${i}`, 'x');
     events.length = 0;
     completed('u1', 'evicted');
-    completed(`x${FINAL_TRANSCRIPT_MEMORY - 1}`, 'x');
+    completed(`x${TRANSCRIPT_MEMORY - 1}`, 'x');
     expect(events).toEqual([{ type: 'input.transcript', itemId: 'u1', text: 'evicted', final: true }]);
   });
 
