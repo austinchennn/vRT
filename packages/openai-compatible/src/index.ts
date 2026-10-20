@@ -4,6 +4,7 @@
  * capabilities and their extension events; everything else lives here.
  */
 import {
+  BoundedSet,
   Emitter,
   Pcm16Resampler,
   fromBase64,
@@ -180,7 +181,7 @@ export class CompatibleSession implements RealtimeSession {
   #lastExtension: string | undefined;
   readonly #callNames = new Map<string, string>();
   readonly #userTranscripts = new Map<string, string>();
-  readonly #finalTranscripts = new Set<string>();
+  readonly #finalTranscripts = new BoundedSet<string>(FINAL_TRANSCRIPT_MEMORY);
 
   constructor(socket: ProviderSocket, config: SessionConfig, options: CompatibleOptions) {
     this.#socket = socket;
@@ -327,7 +328,6 @@ export class CompatibleSession implements RealtimeSession {
         this.#userTranscripts.delete(itemId);
         if (this.#finalTranscripts.has(itemId)) return;
         this.#finalTranscripts.add(itemId);
-        if (this.#finalTranscripts.size > FINAL_TRANSCRIPT_MEMORY) this.#finalTranscripts.delete(this.#finalTranscripts.values().next().value!);
         this.#emit({ type: 'input.transcript', itemId, text: message['transcript'] ?? '', final: true });
         return;
       }

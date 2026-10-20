@@ -1,4 +1,5 @@
 import {
+  BoundedMap,
   Emitter,
   Pcm16Resampler,
   pcm16DurationMs,
@@ -136,7 +137,7 @@ export class CascadeSession implements RealtimeSession {
   #inputMs = 0;
   #pending: Promise<void> = Promise.resolve();
   #response: ActiveResponse | undefined;
-  readonly #items = new Map<string, ActiveResponse>();
+  readonly #items = new BoundedMap<string, ActiveResponse>(KEPT_ITEMS);
   #responseCount = 0;
   #userCount = 0;
   /** Bumped when the user starts speaking: replies requested before that are dropped. */
@@ -337,7 +338,6 @@ export class CascadeSession implements RealtimeSession {
     this.history.push(response.assistant);
     this.#response = response;
     this.#items.set(response.itemId, response);
-    if (this.#items.size > KEPT_ITEMS) this.#items.delete(this.#items.keys().next().value!);
     this.#emit({ type: 'response.start', responseId: id });
     void this.#run(response, messages, options);
   }
