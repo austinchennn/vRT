@@ -1,5 +1,6 @@
 import {
   Emitter,
+  RealtimeError,
   fromBase64,
   pcm16DurationMs,
   toBase64,
@@ -132,14 +133,14 @@ export class GeminiSession implements RealtimeSession {
 
   async update(config: Partial<SessionConfig>): Promise<void> {
     const unsupported = Object.keys(config).filter((key) => key !== 'inputFormat');
-    if (unsupported.length > 0) throw new Error(`gemini: cannot change ${unsupported.join(', ')} after setup`);
+    if (unsupported.length > 0) throw new RealtimeError('unsupported', `gemini: cannot change ${unsupported.join(', ')} after setup`, { provider: 'gemini' });
     if (config.inputFormat) this.#config = { ...this.#config, inputFormat: config.inputFormat };
   }
 
   sendAudio(chunk: AudioChunk): void {
     if (this.#closed) return;
     if (chunk.format.encoding !== 'pcm16') {
-      this.#emit({ type: 'error', error: new Error(`gemini: ${chunk.format.encoding} input is not supported, send PCM16`), recoverable: true });
+      this.#emit({ type: 'error', error: new RealtimeError('unsupported', `gemini: ${chunk.format.encoding} input is not supported, send PCM16`, { provider: 'gemini' }), recoverable: true });
       return;
     }
     if (this.#config.turnDetection === null && !this.#activityOpen) {
@@ -221,7 +222,11 @@ export class GeminiSession implements RealtimeSession {
   #onClose(code: number | undefined, reason: string | undefined): void {
     const expected = this.#closing;
     this.#closed = true;
-    const error = new Error(`gemini connection closed (${code ?? 'no code'}${reason ? `: ${reason}` : ''})`);
+    // Gemini's close codes are not mapped yet: every unexpected close is a `connection` error.
+    const error = new RealtimeError('connection', `gemini connection closed (${code ?? 'no code'}${reason ? `: ${reason}` : ''})`, {
+      provider: 'gemini',
+      providerCode: code === undefined ? undefined : String(code),
+    });
     if (this.#onSetup) {
       this.#onSetup(error);
       this.#onSetup = undefined;
@@ -264,7 +269,7 @@ export class GeminiSession implements RealtimeSession {
     try {
       message = JSON.parse(text) as Json;
     } catch {
-      this.#emit({ type: 'error', error: new Error('Unparseable Gemini message'), recoverable: true });
+      this.#emit({ type: 'error', error: new RealtimeError('provider', 'Unparseable Gemini message', { provider: 'gemini' }), recoverable: true });
       return;
     }
     if (message['usageMetadata']) this.#usage = message['usageMetadata'];
@@ -362,7 +367,7 @@ function envKey(): string | undefined {
 /** Gemini Live API (BidiGenerateContent over WebSocket). */
 export function gemini(options: GeminiOptions = {}): RealtimeModel {
   const apiKey = options.apiKey ?? envKey();
-  if (!apiKey) throw new Error('gemini: missing apiKey (or GEMINI_API_KEY)');
+  if (!apiKey) throw new RealtimeError('auth', 'gemini: missing apiKey (or GEMINI_API_KEY)', { provider: 'gemini' });
   const model = options.model ?? 'gemini-3.8-live';
   const url = new URL(options.url ?? GEMINI_LIVE_URL);
   url.searchParams.set('key', apiKey);

@@ -1,5 +1,5 @@
-import type { RealtimeEvent, RealtimeSession } from '@vrealtime/core';
-import { fromBase64, toBase64 } from '@vrealtime/core';
+import type { RealtimeError, RealtimeEvent, RealtimeSession } from '@vrealtime/core';
+import { fromBase64, isRealtimeError, toBase64 } from '@vrealtime/core';
 import { describe, expect, it } from 'vitest';
 import { BOSON_REALTIME_URL, boson, type ProviderSocket } from '../src/index.js';
 import { FINAL_TRANSCRIPT_MEMORY, MAX_APPEND_BYTES } from '@vrealtime/openai-compatible';
@@ -264,28 +264,62 @@ describe('boson events', () => {
     expect(events).toEqual([{ type: 'input.transcript', itemId: 'u1', text: 'evicted', final: true }]);
   });
 
-  it('maps Boson close codes to error codes', async () => {
+  it('maps Boson close codes to provider-neutral error codes', async () => {
     const closeError = async (code: number, ...before: Record<string, unknown>[]) => {
       const { socket, events } = await connect();
       for (const message of before) socket.server(message);
       socket.drop(code, '');
       const last = events.at(-1);
       expect(last).toMatchObject({ type: 'error', recoverable: false });
-      const { message, code: errorCode, providerType } = (last as { error: Error & { code?: string; providerType?: string } }).error;
-      return { message, code: errorCode, providerType };
+      const error = (last as { error: Error }).error;
+      expect(isRealtimeError(error)).toBe(true);
+      const { message, code: errorCode, retryable, provider, providerCode } = error as RealtimeError;
+      return { message, code: errorCode, retryable, provider, providerCode };
     };
-    expect(await closeError(1013)).toMatchObject({ code: 'max_concurrency', message: expect.stringContaining('retry later') });
-    expect(await closeError(3000)).toMatchObject({ code: 'invalid_api_key' });
+    expect(await closeError(1013)).toMatchObject({ code: 'overloaded', retryable: true, provider: 'boson', providerCode: '1013' });
+    expect(await closeError(3000)).toMatchObject({ code: 'auth', retryable: false, providerCode: '3000' });
     const quota = { type: 'error', error: { type: 'insufficient_quota', code: null, message: 'Spending cap reached', param: null } };
     expect(await closeError(4429, quota)).toEqual({
-      code: 'insufficient_quota',
-      providerType: 'insufficient_quota',
+      code: 'quota',
+      retryable: false,
+      provider: 'boson',
+      providerCode: '4429',
       message: 'boson connection closed (4429): Spending cap reached',
     });
-    expect(await closeError(1000, { type: 'session.idle_timeout', seconds_idle: 300 })).toMatchObject({ code: 'session_idle_timeout', providerType: 'session_limit' });
+    expect(await closeError(1000, { type: 'session.idle_timeout', seconds_idle: 300 })).toMatchObject({
+      code: 'session_limit',
+      retryable: true,
+      message: 'boson connection closed (1000): session.idle_timeout',
+    });
     expect(await closeError(1000, { type: 'session.max_duration_reached', max_duration_sec: 3600 }, { type: 'response.done', response: { id: 'r', status: 'cancelled' } }))
-      .toMatchObject({ code: 'session_max_duration', providerType: 'session_limit' });
-    expect(await closeError(1000)).toEqual({ code: undefined, providerType: undefined, message: 'boson connection closed (1000)' });
+      .toMatchObject({ code: 'session_limit', message: expect.stringContaining('session.max_duration_reached') });
+    expect(await closeError(1000)).toEqual({ code: 'connection', retryable: true, provider: 'boson', providerCode: '1000', message: 'boson connection closed (1000)' });
+  });
+
+  it('maps a handshake the provider refuses by its close code', async () => {
+    let socket!: MockSocket;
+    const model = boson({ apiKey: 'k', socket: (url, headers) => (socket = new MockSocket(url, headers)) });
+    const pending = model.connect({});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    socket.drop(3000, 'invalid key');
+    await expect(pending).rejects.toMatchObject({ name: 'RealtimeError', code: 'auth', providerCode: '3000' });
+  });
+
+  it('maps error events by type and keeps the provider code and payload', async () => {
+    const { socket, events } = await connect();
+    const raw = (type: string, code: string | null) => ({ type: 'error', error: { type, code, message: `${type} message`, param: null } });
+    socket.server(raw('insufficient_quota', 'monthly_cap_reached'));
+    socket.server(raw('rate_limit_error', null));
+    socket.server(raw('voice_output_task_ongoing', null));
+    socket.server(raw('something_new', null));
+    const errors = events.map((e) => (e as Extract<RealtimeEvent, { type: 'error' }>).error as RealtimeError);
+    expect(errors.map((e) => [e.code, e.providerCode])).toEqual([
+      ['quota', 'monthly_cap_reached'],
+      ['rate_limited', 'rate_limit_error'],
+      ['invalid_request', 'voice_output_task_ongoing'],
+      ['provider', 'something_new'],
+    ]);
+    expect(errors[0]!.cause).toEqual(raw('insufficient_quota', 'monthly_cap_reached').error);
   });
 
   it('maps text-only responses', async () => {
@@ -319,7 +353,7 @@ describe('boson events', () => {
   it('surfaces errors with the right recoverable flag', async () => {
     const { socket, events, session } = await connect();
     socket.server({ type: 'error', error: { type: 'invalid_request_error', code: 'response_cancel_not_active', message: 'no response' } });
-    expect(events[0]).toMatchObject({ type: 'error', recoverable: true, error: { message: 'no response', code: 'response_cancel_not_active' } });
+    expect(events[0]).toMatchObject({ type: 'error', recoverable: true, error: { message: 'no response', code: 'invalid_request', providerCode: 'response_cancel_not_active' } });
     socket.server('not json' as never);
     socket.drop(1011, 'server error');
     expect(events.at(-1)).toMatchObject({ type: 'error', recoverable: false });

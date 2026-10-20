@@ -7,6 +7,7 @@ import {
   BoundedSet,
   Emitter,
   Pcm16Resampler,
+  RealtimeError,
   fromBase64,
   pcm16DurationMs,
   toBase64,
@@ -15,6 +16,7 @@ import {
   type Capabilities,
   type EventOf,
   type EventType,
+  type RealtimeErrorCode,
   type RealtimeEvent,
   type RealtimeModel,
   type RealtimeSession,
@@ -50,7 +52,7 @@ export function fetchSocket(fetchImpl: UpgradeFetch = fetch as unknown as Upgrad
   return async (url, headers) => {
     const response = await fetchImpl(url.replace(/^ws/, 'http'), { headers: { ...headers, Upgrade: 'websocket' } });
     const socket = response.webSocket;
-    if (!socket) throw new Error(`WebSocket upgrade failed (HTTP ${response.status})`);
+    if (!socket) throw new RealtimeError(response.status === 401 || response.status === 403 ? 'auth' : 'connection', `WebSocket upgrade failed (HTTP ${response.status})`, { providerCode: String(response.status) });
     socket.accept();
     return socket;
   };
@@ -74,27 +76,34 @@ export interface CompatibleOptions {
    * OpenAI sends `session.created` on connect, so its ack is `session.updated` (the default).
    */
   readyOn?: 'session.created' | 'session.updated';
-  /** Maps an unexpected socket close to a provider error; `undefined` keeps the generic one. */
-  describeClose?: (close: CloseContext) => CloseDescription | undefined;
+  /** How the provider's errors map onto `RealtimeErrorCode`, on top of `OPENAI_ERROR_TYPES`. */
+  errors?: ErrorTables;
   socket?: SocketFactory;
 }
 
-/** What the session saw up to an unexpected socket close. */
-export interface CloseContext {
-  code: number | undefined;
-  reason: string | undefined;
-  /** Payload of the last `error` event (`type`, `code`, `message`). */
-  lastError: { type?: string; code?: string; message?: string } | undefined;
-  /** Type of the last extension event, e.g. `session.idle_timeout`. */
-  lastExtension: string | undefined;
+/**
+ * A provider's error vocabulary as data, so a provider differs from the base by
+ * tables rather than code. Anything unmapped is `provider` (error events) or
+ * `connection` (closes).
+ */
+export interface ErrorTables {
+  /** `error.type` of an `error` event → code; merged over `OPENAI_ERROR_TYPES`. */
+  errorTypes?: Readonly<Record<string, RealtimeErrorCode>>;
+  /** Close code of an unexpected socket close, also before open → code. */
+  closeCodes?: Readonly<Record<number, RealtimeErrorCode>>;
+  /** Server events after which a normal close (1000) is a `session_limit`. */
+  sessionLimitEvents?: readonly string[];
 }
 
-/** Attached to the close error as `code` and `providerType`, like `error` events. */
-export interface CloseDescription {
-  code: string;
-  type?: string;
-  message: string;
-}
+/** The error types of the OpenAI Realtime API, which compatible providers share. */
+export const OPENAI_ERROR_TYPES: Readonly<Record<string, RealtimeErrorCode>> = {
+  authentication_error: 'auth',
+  insufficient_quota: 'quota',
+  rate_limit_error: 'rate_limited',
+  invalid_request_error: 'invalid_request',
+  server_error: 'provider',
+  api_error: 'provider',
+};
 
 /** One provider `input_audio_buffer.append` must stay under 1 MiB; base64 grows 4/3, so cap raw bytes (even, for PCM16). */
 export const MAX_APPEND_BYTES = 785_408;
@@ -163,6 +172,10 @@ function sameFormat(a: AudioFormat, b: AudioFormat): boolean {
   return a.encoding === b.encoding && (a.encoding !== 'pcm16' || (b.encoding === 'pcm16' && a.sampleRate === b.sampleRate));
 }
 
+function closeCode(tables: ErrorTables | undefined, code: number | undefined): RealtimeErrorCode | undefined {
+  return code === undefined ? undefined : tables?.closeCodes?.[code];
+}
+
 type Json = Record<string, any>;
 
 export class CompatibleSession implements RealtimeSession {
@@ -177,8 +190,11 @@ export class CompatibleSession implements RealtimeSession {
   #ready = false;
   #closing = false;
   #closed = false;
-  #lastError: CloseContext['lastError'];
-  #lastExtension: string | undefined;
+  readonly #errorTypes: Readonly<Record<string, RealtimeErrorCode>>;
+  /** The last provider `error` event; it explains a close that follows it, e.g. billing before 4429. */
+  #lastError: RealtimeError | undefined;
+  /** A session-limit event the provider sent; the normal close after it is a `session_limit`. */
+  #sessionLimit: string | undefined;
   readonly #callNames = new Map<string, string>();
   readonly #userTranscripts = new Map<string, string>();
   readonly #finalTranscripts = new BoundedSet<string>(FINAL_TRANSCRIPT_MEMORY);
@@ -187,6 +203,7 @@ export class CompatibleSession implements RealtimeSession {
     this.#socket = socket;
     this.#options = options;
     this.capabilities = options.capabilities;
+    this.#errorTypes = { ...OPENAI_ERROR_TYPES, ...options.errors?.errorTypes };
     this.#inputFormat = config.inputFormat ?? DEFAULT_FORMAT;
     this.#outputFormat = config.outputFormat ?? DEFAULT_FORMAT;
     socket.addEventListener('message', (event) => this.#onMessage(event.data));
@@ -209,7 +226,7 @@ export class CompatibleSession implements RealtimeSession {
     if (!sameFormat(chunk.format, this.#inputFormat)) {
       // Pass-through is the norm; convert only PCM16 rate mismatches.
       if (chunk.format.encoding !== 'pcm16' || this.#inputFormat.encoding !== 'pcm16') {
-        this.#emitter.emit({ type: 'error', error: new Error(`Cannot convert ${chunk.format.encoding} to ${this.#inputFormat.encoding}`), recoverable: true });
+        this.#emit({ type: 'error', error: this.#error('unsupported', `Cannot convert ${chunk.format.encoding} to ${this.#inputFormat.encoding}`), recoverable: true });
         return;
       }
       if (this.#resampler?.from !== chunk.format.sampleRate) this.#resampler = new Pcm16Resampler(chunk.format.sampleRate, this.#inputFormat.sampleRate);
@@ -278,16 +295,21 @@ export class CompatibleSession implements RealtimeSession {
     this.#emitter.emit(event);
   }
 
+  #error(code: RealtimeErrorCode, message: string, providerCode?: string, cause?: unknown): RealtimeError {
+    return new RealtimeError(code, message, { provider: this.#options.provider, providerCode, cause });
+  }
+
   #onClose(code: number | undefined, reason: string | undefined): void {
     const expected = this.#closing;
     this.#closed = true;
     if (expected) return;
-    const message = `${this.#options.provider} connection closed (${code ?? 'no code'}${reason ? `: ${reason}` : ''})`;
-    const described = this.#options.describeClose?.({ code, reason, lastError: this.#lastError, lastExtension: this.#lastExtension });
-    const error = described
-      ? Object.assign(new Error(`${message}: ${described.message}`), { code: described.code, providerType: described.type })
-      : new Error(message);
-    this.#emit({ type: 'error', error, recoverable: false });
+    const limited = code === 1000 && this.#sessionLimit !== undefined;
+    const mapped = closeCode(this.#options.errors, code) ?? (limited ? 'session_limit' : 'connection');
+    // The error event the provider sent before closing names the cause better than the close frame.
+    const before = this.#lastError?.code === mapped ? this.#lastError : undefined;
+    const detail = before ? `: ${before.message}` : limited ? `: ${this.#sessionLimit}` : '';
+    const message = `${this.#options.provider} connection closed (${code ?? 'no code'}${reason ? `: ${reason}` : ''})${detail}`;
+    this.#emit({ type: 'error', error: this.#error(mapped, message, code === undefined ? undefined : String(code), before), recoverable: false });
   }
 
   #onMessage(raw: unknown): void {
@@ -296,7 +318,7 @@ export class CompatibleSession implements RealtimeSession {
     try {
       message = JSON.parse(raw) as Json;
     } catch {
-      this.#emit({ type: 'error', error: new Error('Unparseable provider event'), recoverable: true });
+      this.#emit({ type: 'error', error: this.#error('provider', 'Unparseable provider event'), recoverable: true });
       return;
     }
     const type = message['type'] as string;
@@ -392,16 +414,14 @@ export class CompatibleSession implements RealtimeSession {
       }
       case 'error': {
         const detail = message['error'] ?? {};
-        this.#lastError = { type: detail.type, code: detail.code, message: detail.message };
-        const error = Object.assign(new Error(detail.message ?? 'Provider error'), { code: detail.code, providerType: detail.type });
+        const error = this.#error(this.#errorTypes[detail.type] ?? 'provider', detail.message ?? 'Provider error', detail.code ?? detail.type, detail);
+        this.#lastError = error;
         this.#emit({ type: 'error', error, recoverable: true });
         return;
       }
       default:
-        if (this.#options.extensions?.includes(type)) {
-          this.#lastExtension = type;
-          this.#emit({ type: 'extension', name: type, data: message });
-        }
+        if (this.#options.errors?.sessionLimitEvents?.includes(type)) this.#sessionLimit = type;
+        if (this.#options.extensions?.includes(type)) this.#emit({ type: 'extension', name: type, data: message });
     }
   }
 }
@@ -420,16 +440,16 @@ export function createCompatibleModel(options: CompatibleOptions): RealtimeModel
         socket.close(1000, 'aborted');
         signal.throwIfAborted();
       }
-      if (socket.readyState > OPEN) throw new Error(`${options.provider}: connection closed before open`);
+      if (socket.readyState > OPEN) throw new RealtimeError('connection', `${options.provider}: connection closed before open`, { provider: options.provider });
       const session = new CompatibleSession(socket, merged, options);
-      if (socket.readyState !== OPEN) await waitForOpen(socket, options.provider, signal);
+      if (socket.readyState !== OPEN) await waitForOpen(socket, options, signal);
       socket.send(JSON.stringify({ type: 'session.update', session: sessionPayload(merged, options) }));
       return session;
     },
   };
 }
 
-function waitForOpen(socket: ProviderSocket, provider: string, signal: AbortSignal | undefined): Promise<void> {
+function waitForOpen(socket: ProviderSocket, { provider, errors }: CompatibleOptions, signal: AbortSignal | undefined): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const fail = (error: Error) => {
       signal?.removeEventListener('abort', onAbort);
@@ -444,7 +464,13 @@ function waitForOpen(socket: ProviderSocket, provider: string, signal: AbortSign
       signal?.removeEventListener('abort', onAbort);
       resolve();
     });
-    socket.addEventListener('error', () => fail(new Error(`${provider}: connection failed`)));
-    socket.addEventListener('close', (event) => fail(new Error(`${provider}: connection closed before open (${event.code ?? ''})`)));
+    socket.addEventListener('error', () => fail(new RealtimeError('connection', `${provider}: connection failed`, { provider })));
+    socket.addEventListener('close', ({ code }) => {
+      // A provider may refuse the handshake with one of its close codes, e.g. an invalid key.
+      fail(new RealtimeError(closeCode(errors, code) ?? 'connection', `${provider}: connection closed before open (${code ?? ''})`, {
+        provider,
+        providerCode: code === undefined ? undefined : String(code),
+      }));
+    });
   });
 }

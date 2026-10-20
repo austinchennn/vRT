@@ -1,5 +1,5 @@
-import type { AudioFormat, Capabilities, RealtimeModel, SessionConfig } from '@vrealtime/core';
-import { createCompatibleModel, type CloseContext, type CloseDescription, type SocketFactory } from '@vrealtime/openai-compatible';
+import { RealtimeError, type AudioFormat, type Capabilities, type RealtimeModel, type SessionConfig } from '@vrealtime/core';
+import { createCompatibleModel, type ErrorTables, type SocketFactory } from '@vrealtime/openai-compatible';
 
 export { fetchSocket } from '@vrealtime/openai-compatible';
 export type { ProviderSocket, SocketFactory } from '@vrealtime/openai-compatible';
@@ -37,28 +37,20 @@ export const BOSON_CAPABILITIES: Capabilities = {
 const EXTENSIONS = ['conversation.context.summarized', 'session.idle_timeout', 'session.max_duration_reached'];
 
 /**
- * Boson's WebSocket close codes, surfaced as the close error's `code`.
- * See https://docs.boson.ai/api-reference/realtime/overview.md.
+ * Boson's error vocabulary on top of the OpenAI error types it shares.
+ * See https://docs.boson.ai/api-reference/realtime/overview.md and /api-reference/errors.md.
  */
-function describeBosonClose({ code, lastError, lastExtension }: CloseContext): CloseDescription | undefined {
-  switch (code) {
-    case 1013:
-      return { code: 'max_concurrency', message: 'max concurrency exceeded, retry later' };
-    case 3000:
-      return { code: 'invalid_api_key', message: 'invalid API key or invalid/expired ephemeral key' };
-    case 4429:
-      // Always preceded by an `insufficient_quota` error event carrying the upstream message.
-      return {
-        code: 'insufficient_quota',
-        type: 'insufficient_quota',
-        message: lastError?.type === 'insufficient_quota' && lastError.message ? lastError.message : 'billing entitlement refused',
-      };
-    case 1000:
-      if (lastExtension === 'session.idle_timeout') return { code: 'session_idle_timeout', type: 'session_limit', message: 'no user speech for the idle window' };
-      if (lastExtension === 'session.max_duration_reached') return { code: 'session_max_duration', type: 'session_limit', message: 'maximum session duration reached' };
-  }
-  return undefined;
-}
+export const BOSON_ERRORS: ErrorTables = {
+  errorTypes: {
+    voice_output_task_ongoing: 'invalid_request',
+    invalid_previous_item_id: 'invalid_request',
+    conversation_item_duplicate_id: 'invalid_request',
+    conversation_item_not_found: 'invalid_request',
+  },
+  // 4429 always follows an `insufficient_quota` error event, whose message the close error repeats.
+  closeCodes: { 1013: 'overloaded', 3000: 'auth', 4429: 'quota' },
+  sessionLimitEvents: ['session.idle_timeout', 'session.max_duration_reached'],
+};
 
 function envKey(): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
@@ -68,7 +60,7 @@ function envKey(): string | undefined {
 /** Boson Higgs Realtime (OpenAI Realtime GA compatible). */
 export function boson(options: BosonOptions = {}): RealtimeModel {
   const apiKey = options.apiKey ?? envKey();
-  if (!apiKey) throw new Error('boson: missing apiKey (or BOSON_API_KEY)');
+  if (!apiKey) throw new RealtimeError('auth', 'boson: missing apiKey (or BOSON_API_KEY)', { provider: 'boson' });
   const model = options.model ?? 'higgs-realtime';
   const defaults: SessionConfig = {
     turnDetection: options.turnDetection === undefined ? 'semantic' : options.turnDetection,
@@ -89,7 +81,7 @@ export function boson(options: BosonOptions = {}): RealtimeModel {
     extensions: EXTENSIONS,
     // Boson sends nothing on connect and acks the first `session.update` with `session.created`.
     readyOn: 'session.created',
-    describeClose: describeBosonClose,
+    errors: BOSON_ERRORS,
     ...(options.socket ? { socket: options.socket } : {}),
   });
 }

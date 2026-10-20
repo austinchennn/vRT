@@ -90,6 +90,8 @@ describe('gemini connect', () => {
     socket.open();
     socket.drop(1008, 'API key not valid');
     await expect(pending).rejects.toThrow(/1008: API key not valid/);
+    // Gemini's close codes are not mapped yet: the close stays a `connection` error with its code.
+    await expect(pending).rejects.toMatchObject({ name: 'RealtimeError', code: 'connection', provider: 'gemini', providerCode: '1008' });
   });
 
   it('text modality and manual turns change the setup', async () => {
@@ -142,6 +144,7 @@ describe('gemini input', () => {
   it('rejects mid-session config changes it cannot apply', async () => {
     const { session } = await connect();
     await expect(session.update({ instructions: 'x' })).rejects.toThrow(/after setup/);
+    await expect(session.update({ instructions: 'x' })).rejects.toMatchObject({ code: 'unsupported' });
     await expect(session.update({ inputFormat: { encoding: 'pcm16', sampleRate: 24000, channels: 1 } })).resolves.toBeUndefined();
   });
 });
@@ -198,6 +201,7 @@ describe('gemini output', () => {
     socket.server({ sessionResumptionUpdate: { newHandle: 'h', resumable: true } });
     socket.drop(1011, 'internal');
     expect(events.slice(-3).map((e) => (e.type === 'extension' ? e.name : e.type))).toEqual(['goAway', 'sessionResumptionUpdate', 'error']);
+    expect(events.at(-1)).toMatchObject({ recoverable: false, error: { code: 'connection', retryable: true, providerCode: '1011' } });
   });
 });
 
