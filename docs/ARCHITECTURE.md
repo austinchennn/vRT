@@ -314,6 +314,38 @@ const model = cascade({
 
 `revision` 只出现在 core 的 `input.transcript` 和 `AgentSession` 的 `transcript` 事件上（进程内），不上 wire；`Capabilities.inputTranscription` 仍是布尔值，不区分 interim。需要在客户端区分时，再按 spec 流程加 capability。
 
+### 8.2 按 revision 替换的推测任务（应用自己组合）
+
+边听边推测（例如根据 interim 预先规划一次文档修改）由应用实现，vRT 不内建任务协调器：它需要的只是 8.1 的 `itemId` / `revision` / `final`，再加上 `AbortController` 和一个 generation 检查。参考组合（约 50 行）及其测试在 `packages/cascade/test/speculation.test.ts`，核心是：
+
+```ts
+session.on('transcript', (event) => {
+  if (event.role !== 'user' || event.revision === undefined) return;
+  const previous = current.get(event.itemId);
+  if (previous && event.revision <= previous.revision) return; // 重复或更旧的 revision
+  previous?.controller.abort();                                // 新 revision 立即取消旧任务
+  current.delete(event.itemId);
+  if (!event.text) return;                                     // 空 final：这句话被撤回
+  const entry = { revision: event.revision, controller: new AbortController() };
+  current.set(event.itemId, entry);                            // 另按需限制同时推测的句子数
+  plan(event.text, entry.controller.signal).then((preview) => {
+    // generation 检查：旧任务即使忽略 signal、迟到完成，也不会被当成当前结果
+    if (current.get(event.itemId) === entry) showPreview(event.itemId, event.revision, preview);
+  });
+});
+```
+
+| 约定 | 内容 |
+|---|---|
+| 产物 | 推测结果是可丢弃的不透明数据，只用于展示。它不进入 `Tool.run`、`submitToolResult` 或 `respond` 的执行队列，也不要把推测包装成工具、再靠约定避免副作用 |
+| final | final 只表示转写结束，不等于用户授权或业务提交。正式操作由应用另发请求，重新校验和授权，走既有执行路径；不复用推测输出绕过检查 |
+| 取消 | abort 只是请求停止，不能撤销外部系统已经发生的副作用；推测任务应当没有副作用，有副作用的请求不要自动重试 |
+| 上限与回收 | 同时推测的句子数、输出大小、任务超时（例如 `AbortSignal.timeout()`）由应用决定；新 revision、撤回、close 都会 abort 并丢弃结果 |
+| 策略 | debounce、限频、什么时候值得推测，都是应用本地策略；vRT 不写死停顿毫秒数、语言规则或领域命令。不用这套组合时没有任何后台任务 |
+| 上下文 | 任务需要上下文时，显式传入不可变快照；快照版本与转写 revision 是两回事 |
+
+旧结果在新 revision 到达的同一次事件回调里失效（同步 abort，没有额外的异步跳转）。在本地用 fake 模型测得，从模型给出结果到 `input.transcript` 发出，中位数约 0.3 µs，p99 约 1 µs（Node 22，M 系列 Mac；只代表 vRT 自身开销，不含 STT 供应商与网络）。
+
 ## 9. Boson 适配器映射（OpenAI Realtime GA 兼容）
 
 | vRealTime | Boson Higgs Realtime |
