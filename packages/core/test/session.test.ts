@@ -421,6 +421,21 @@ describe('truncation', () => {
     ]);
   });
 
+  it('truncates an item the user never started hearing to nothing', async () => {
+    const { fake, session } = await setup();
+    userTurn(fake);
+    speak(fake, 'r1', 'a1', 1000, 'First part');
+    speak(fake, 'r1', 'a2', 1000, 'Second part');
+    session.interrupt();
+    session.playback('a1', 400);
+    session.playback('a2', 0);
+    expect(fake.commandsOf('truncate')).toEqual([
+      { type: 'truncate', itemId: 'a1', audioEndMs: 400 },
+      { type: 'truncate', itemId: 'a2', audioEndMs: 0 },
+    ]);
+    expect(session.transcript.find((t) => t.itemId === 'a2')).toEqual({ role: 'agent', itemId: 'a2', text: '', truncated: true });
+  });
+
   it('never truncates past the audio received', async () => {
     const { fake, session } = await setup();
     userTurn(fake);
@@ -485,6 +500,14 @@ describe('truncation', () => {
         expect(ofType('interrupted')).toHaveLength(0);
       });
     }
+
+    it('truncates to nothing audio queued behind it that never started playing', async () => {
+      const { fake, session } = await heardLater();
+      fake.emit({ type: 'input.speech.start', atMs: 0 });
+      session.playback('a1', 0);
+      expect(fake.commandsOf('truncate')).toEqual([{ type: 'truncate', itemId: 'a1', audioEndMs: 0 }]);
+      expect(session.transcript.find((t) => t.itemId === 'a1')).toEqual({ role: 'agent', itemId: 'a1', text: '', truncated: true });
+    });
 
     it('applies a report that arrived before the user took the floor', async () => {
       const { fake, session } = await heardLater();

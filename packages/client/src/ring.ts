@@ -51,9 +51,13 @@ export class PlaybackRing {
     for (; i < out.length; i++) out[i] = 0;
   }
 
-  /** Drops everything buffered and returns (then resets) the played counts. */
+  /**
+   * Drops everything buffered and returns (then resets) the played counts.
+   * Items still queued but never started count as 0: the user heard none of them.
+   */
   flush(): Record<string, number> {
     const played = this.played;
+    for (const segment of this.segments) played[segment[0]] ??= 0;
     this.start = 0;
     this.size = 0;
     this.segments = [];
