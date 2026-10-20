@@ -175,7 +175,7 @@ idle ──speech.start──▶ listening ──speech.end / commit──▶ re
 
 1. **打断后不再有任何副作用**：属于已打断 epoch、尚未执行的工具调用永远不会执行。服务端工具通过 `AbortSignal` 取消；客户端工具由客户端闸门拒绝（见 5.3）。
 2. **每个调用恰好一个结果**：被取消的调用也会给模型回一条 `cancelled` 结果，避免模型侧对话记录不完整。
-3. **对话记录与用户实际听到的一致**：用客户端上报的已播放毫秒数调用 `truncate`。
+3. **对话记录与用户实际听到的一致**：用客户端上报的已播放毫秒数调用 `truncate`。没开始播放的 item 上报 0；服务端没能送达的音频（打断时丢掉了它的 `audio.start`，或者当时没有连接）由服务端按 0 处理。模型生成远快于播放，回复往往在用户插话之前就已结束，所以已结束回复中还在播放的音频也要按上报截断。这些对账集中在 core 的 `PlaybackLedger`：每个音频 item 一条记录（live / trailing / cut / interrupted），它只给出截断决定，由 Session 去执行，记录数有上限。
 4. **单个工具调用是原子的**：要么完整执行，要么不执行，由工具实现方保证；vdoc 的 `DocumentEngine` 就是这样的参考实现。
 
 ### 4.3 工具
@@ -237,7 +237,7 @@ session.interrupt();
 ```
 
 - 麦克风：AudioWorklet 采集，按需重采样或用 WebCodecs 编码 Opus，以二进制帧发送。
-- 播放：AudioWorklet 环形缓冲。收到 `input.speech.start` 或本地 VAD 触发时**立即清空缓冲**，并上报已播放的毫秒数。
+- 播放：AudioWorklet 环形缓冲。收到 `input.speech.start` 或本地 VAD 触发时**立即清空缓冲**，并按 item 上报已播放的毫秒数，排在缓冲里还没开始播的 item 报 0。
 - 工具宿主：按到达顺序串行执行，带 **epoch 闸门**：`interrupt()` 在本地立刻关闭当前 epoch，收到的旧 epoch 调用一律回 `INTERRUPTED`，不执行；工具真正开始执行的那一刻会再检查一次闸门，排队后才到的打断也拦得住；已关闭 epoch 的 `tool.call.delta` 预览直接丢弃。
 - 打断通知不等服务端：`interrupt()` 当场发出 `interrupted`（`source: 'local'`），UI 立即清理预览和播放；服务端随后对同一 epoch 的确认不再重复通知，服务端自己发起的打断（如插话）发出 `source: 'server'`。`npm run bench:latency -- --rtt 100` 下打断通知从约 103 ms（一个往返）降到约 0.01 ms。
 - 结构：`EpochGate`（epoch 状态）、`ToolHost`（排队、执行、恰好一个结果）、`ClientSession`（连接与编排）各管一件事。
@@ -263,7 +263,7 @@ session.interrupt();
 1. 协议会话：握手、`seq` / `ack`、断线续传、心跳、退避重连。
 2. 工具宿主：声明工具（名称、描述、JSON Schema），按到达顺序串行执行，**epoch 闸门**，每个调用恰好回一个结果，可选的 `tool.call.delta` 预览。
 3. `interrupt()`：本地立刻关闭当前 epoch，再通知服务端。
-4. 音频（可选）：采集上行，播放下行，打断时立即清空播放缓冲并上报已播放毫秒数。没有麦克风和喇叭的设备（比如一盏灯）只实现 1–3。
+4. 音频（可选）：采集上行，播放下行，打断时立即清空播放缓冲并上报已播放毫秒数（收到但没开始播的 item 报 0）。没有麦克风和喇叭的设备（比如一盏灯）只实现 1–3。
 
 | SDK | 平台 | 计划 |
 |---|---|---|

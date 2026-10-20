@@ -123,6 +123,8 @@ interface Outgoing {
   data: string | Uint8Array;
   /** Set for audio (and its `audio.start`), so an interruption can drop it before it is sent. */
   epoch?: number;
+  /** Set on an `audio.start`: if it is dropped, the client never learns of the item. */
+  itemId?: string;
 }
 
 /** One agent session and everything that must survive a reconnect. */
@@ -139,6 +141,8 @@ class LiveSession {
   expiry: unknown;
   #audioSeq = 0;
   #audioItem: string | undefined;
+  /** The last item whose audio arrived while no socket was attached, already reported as not heard. */
+  #undelivered: string | undefined;
   #queue: Outgoing[] = [];
   #flushTimer: unknown;
 
@@ -196,6 +200,7 @@ class LiveSession {
 
   detach(): void {
     this.socket = undefined;
+    this.#discard(this.#queue);
     this.#queue = [];
     this.#audioItem = undefined;
   }
@@ -204,6 +209,7 @@ class LiveSession {
     this.#flushTimer = undefined;
     const socket = this.socket;
     if (!socket) {
+      this.#discard(this.#queue);
       this.#queue = [];
       return;
     }
@@ -212,29 +218,44 @@ class LiveSession {
   }
 
   #audio(event: Extract<AgentEvent, { type: 'audio' }>): void {
-    if (!this.socket) return;
+    if (!this.socket) {
+      // Nobody is attached to hear it: report the item as not heard, once (§8.4).
+      if (event.itemId !== this.#undelivered) {
+        this.#undelivered = event.itemId;
+        this.session.playback(event.itemId, 0);
+      }
+      return;
+    }
     if (event.itemId !== this.#audioItem) {
       this.#audioItem = event.itemId;
-      this.send({ type: 'audio.start', itemId: event.itemId, responseId: event.responseId, epoch: event.epoch }, event.epoch);
+      const start = this.outbox.stamp({ type: 'audio.start', itemId: event.itemId, responseId: event.responseId, epoch: event.epoch });
+      this.#write(encodeMessage(start), event.epoch, event.itemId);
     }
     this.#write(encodeAudioFrame(OUTPUT, this.#audioSeq++, event.chunk.data), event.epoch);
   }
 
   /** Frames keep their order: once anything is queued, everything queues behind it. */
-  #write(data: string | Uint8Array, epoch?: number): void {
+  #write(data: string | Uint8Array, epoch?: number, itemId?: string): void {
     const socket = this.socket;
     if (!socket) return;
     if (this.#queue.length === 0 && !socket.congested()) {
       socket.send(data);
       return;
     }
-    this.#queue.push(epoch === undefined ? { data } : { data, epoch });
+    this.#queue.push({ data, ...(epoch !== undefined ? { epoch } : {}), ...(itemId !== undefined ? { itemId } : {}) });
     this.#scheduleFlush();
   }
 
   #dropAudio(closedEpoch: number): void {
-    this.#queue = this.#queue.filter((item) => item.epoch === undefined || item.epoch > closedEpoch);
+    const closed = (item: Outgoing) => item.epoch !== undefined && item.epoch <= closedEpoch;
+    this.#discard(this.#queue.filter(closed));
+    this.#queue = this.#queue.filter((item) => !closed(item));
     this.#audioItem = undefined;
+  }
+
+  /** Queued output that will never be sent: an item whose `audio.start` goes with it was not heard at all. */
+  #discard(items: readonly Outgoing[]): void {
+    for (const item of items) if (item.itemId !== undefined) this.session.playback(item.itemId, 0);
   }
 
   #scheduleFlush(): void {

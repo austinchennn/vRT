@@ -5,7 +5,10 @@ import { PlaybackRing } from './ring.js';
 export interface AudioSink {
   /** Queue mono little-endian PCM16 for `itemId`. */
   enqueue(itemId: string, pcm16: Uint8Array): void;
-  /** Stop at once (within one render quantum) and return the milliseconds played per item since the last flush. */
+  /**
+   * Stop at once (within one render quantum) and return the milliseconds played per item
+   * since the last flush, with 0 for an item that was queued but never started (§8.4).
+   */
   flush(): Promise<Record<string, number>>;
   close(): Promise<void>;
 }

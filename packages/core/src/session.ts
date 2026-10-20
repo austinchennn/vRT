@@ -1,9 +1,10 @@
 import type { AgentDefinition, ToolCallInfo, Turn, TurnMetrics, TurnState } from './agent.js';
 import { pcm16DurationMs, type AudioChunk } from './audio.js';
-import { BoundedMap, BoundedSet } from './bounded.js';
+import { BoundedSet } from './bounded.js';
 import { Emitter } from './emitter.js';
 import { addUsage, type EventOf, type RealtimeEvent } from './events.js';
 import type { Capabilities, RealtimeSession, SessionConfig, ToolSpec } from './model.js';
+import { PlaybackLedger, type Truncation } from './playback.js';
 import { validateToolArgs, type Tool, type ToolResult } from './tool.js';
 import { ToolStreams, type ToolStreamEvent } from './tool-stream.js';
 import type { Vad } from './vad.js';
@@ -71,7 +72,6 @@ export interface StartSessionOptions {
 
 const DEFAULT_CLIENT_TOOL_TIMEOUT_MS = 30_000;
 const FINISHED_RESPONSES_KEPT = 64;
-const TRAILING_AUDIO_KEPT = 16;
 
 interface CallRecord {
   callId: string;
@@ -93,13 +93,6 @@ interface ResponseRecord {
   epoch: number;
   ended: boolean;
   calls: Set<string>;
-}
-
-interface AudioItem {
-  responseId: string;
-  receivedMs: number;
-  /** Trailing audio only: the user took the floor after its response ended. */
-  cut?: boolean;
 }
 
 export function toModelOutput(result: ToolResult): unknown {
@@ -157,18 +150,10 @@ export class AgentSession {
   #pumping = false;
   readonly #streams: ToolStreams;
 
-  readonly #audioItems = new Map<string, AudioItem>();
-  /**
-   * Audio of turns that ended while the edge may still be playing it: a response
-   * often ends long before the user has heard it all. Oldest first, as played.
-   */
-  readonly #trailingAudio = new BoundedMap<string, AudioItem>(TRAILING_AUDIO_KEPT);
-  readonly #played = new Map<string, number>();
-  readonly #interruptedItems = new Set<string>();
+  /** What was sent to the edge versus what it reports as heard, per audio item. */
+  readonly #playback = new PlaybackLedger();
   readonly #transcript: TranscriptItem[] = [];
   readonly #transcriptIndex = new Map<string, TranscriptItem>();
-  /** Full agent text of interrupted items, so repeated truncation always cuts from the original. */
-  readonly #untruncated = new Map<string, string>();
   readonly #turnAgentItems = new Set<string>();
   #closed = false;
 
@@ -251,9 +236,7 @@ export class AgentSession {
   /** Edge report of how much of an audio item the user actually heard. */
   playback(itemId: string, playedMs: number): void {
     if (this.#closed) return;
-    this.#played.set(itemId, playedMs);
-    if (this.#interruptedItems.has(itemId)) this.#truncate(itemId);
-    else this.#resolveTrailing(itemId, playedMs);
+    this.#truncate(this.#playback.report(itemId, playedMs));
   }
 
   /**
@@ -270,7 +253,7 @@ export class AgentSession {
   #interrupt(reason: InterruptReason, providerCancels: boolean): void {
     if (this.#closed) return;
     if (!this.#isResponding()) {
-      this.#cutTrailingAudio();
+      this.#truncate(this.#playback.userTookFloor());
       return;
     }
     const startedAt = this.#clock.now();
@@ -279,7 +262,7 @@ export class AgentSession {
 
     // Decide what belongs to the closed epoch before calling into the model: a model may
     // end its response synchronously inside cancel(), and that must not hide anything here.
-    const interruptedItems = [...this.#audioItems].filter(([, item]) => this.#responses.get(item.responseId)?.epoch === closedEpoch).map(([itemId]) => itemId);
+    const truncations = this.#playback.interrupt((responseId) => this.#responses.get(responseId)?.epoch === closedEpoch);
     const interruptedCalls = [...this.#calls.values()].filter(
       (record) => record.epoch === closedEpoch && record.status !== 'settled' && !(record.status === 'running' && record.tool?.async),
     );
@@ -293,10 +276,7 @@ export class AgentSession {
     }
     this.#awaitingResponse = false;
 
-    for (const itemId of interruptedItems) {
-      this.#interruptedItems.add(itemId);
-      this.#truncate(itemId);
-    }
+    this.#truncate(truncations);
     for (const record of interruptedCalls) {
       record.controller.abort(new Error('Interrupted'));
       this.#settle(record, { ok: false, code: 'INTERRUPTED', message: `Interrupted by ${reason}` });
@@ -308,7 +288,7 @@ export class AgentSession {
     this.#metrics.interruptLatencyMs = this.#clock.now() - startedAt;
     this.#endTurn(true);
     // Audio of the turn's earlier, already ended responses may still be playing too.
-    this.#cutTrailingAudio();
+    this.#truncate(this.#playback.userTookFloor());
   }
 
   /** Delivers the app's result for a client tool call. Late or duplicate results are ignored. */
@@ -383,9 +363,7 @@ export class AgentSession {
     on('output.audio', (event) => {
       const epoch = this.#liveEpoch(event.responseId);
       if (epoch === undefined) return;
-      const item = this.#audioItems.get(event.itemId) ?? { responseId: event.responseId, receivedMs: 0 };
-      item.receivedMs += chunkDurationMs(event.chunk);
-      this.#audioItems.set(event.itemId, item);
+      this.#playback.received(event.itemId, event.responseId, chunkDurationMs(event.chunk));
       if (this.#metrics.timeToFirstAudioMs === undefined && this.#speechEndAt !== undefined) {
         this.#metrics.timeToFirstAudioMs = this.#clock.now() - this.#speechEndAt;
       }
@@ -708,57 +686,26 @@ export class AgentSession {
 
   #finalizeAgentTranscript(): void {
     for (const itemId of this.#turnAgentItems) {
-      if (this.#interruptedItems.has(itemId)) continue;
+      if (this.#playback.isInterrupted(itemId)) continue;
       const item = this.#transcriptIndex.get(itemId);
       if (item) this.#emitter.emit({ type: 'transcript', role: 'agent', itemId, text: item.text, final: true });
     }
     this.#turnAgentItems.clear();
-    for (const [itemId, audio] of this.#audioItems) {
-      if (this.#interruptedItems.has(itemId)) continue;
-      this.#audioItems.delete(itemId);
-      this.#trailingAudio.set(itemId, audio);
+    this.#playback.endTurn();
+  }
+
+  /** Applies the ledger's decisions to the model and to the local transcript. */
+  #truncate(truncations: readonly Truncation[]): void {
+    for (const { itemId, audioEndMs, receivedMs } of truncations) {
+      if (this.capabilities.truncate) this.#model.truncate(itemId, audioEndMs);
+      const item = this.#transcriptIndex.get(itemId);
+      if (!item || receivedMs <= 0) continue;
+      // Keep the share of the text that was heard, so the local transcript matches the user's experience.
+      const full = this.#playback.originalText(itemId, item.text);
+      item.text = full.slice(0, Math.round(full.length * (audioEndMs / receivedMs)));
+      item.truncated = true;
+      this.#emitter.emit({ type: 'transcript', role: 'agent', itemId, text: item.text, final: true });
     }
-  }
-
-  /** The user took the floor: trailing audio was heard only as far as the edge reports. */
-  #cutTrailingAudio(): void {
-    for (const [itemId, audio] of this.#trailingAudio) {
-      audio.cut = true;
-      const played = this.#played.get(itemId);
-      if (played !== undefined) this.#resolveTrailing(itemId, played);
-    }
-  }
-
-  /**
-   * A report on trailing audio: heard in full, it is done with. Cut short after the
-   * user took the floor, it becomes an interrupted item and is truncated like one.
-   */
-  #resolveTrailing(itemId: string, playedMs: number): void {
-    const audio = this.#trailingAudio.get(itemId);
-    if (!audio) return;
-    const heardAll = Math.round(playedMs) >= Math.round(audio.receivedMs);
-    if (!heardAll && !audio.cut) return;
-    this.#trailingAudio.delete(itemId);
-    if (heardAll) return;
-    this.#audioItems.set(itemId, audio);
-    this.#interruptedItems.add(itemId);
-    this.#truncate(itemId);
-  }
-
-  #truncate(itemId: string): void {
-    const played = this.#played.get(itemId);
-    const audio = this.#audioItems.get(itemId);
-    if (played === undefined || audio === undefined) return;
-    const audioEndMs = Math.max(0, Math.min(Math.round(played), Math.round(audio.receivedMs)));
-    if (this.capabilities.truncate) this.#model.truncate(itemId, audioEndMs);
-    const item = this.#transcriptIndex.get(itemId);
-    if (!item || audio.receivedMs <= 0) return;
-    // Keep the share of the text that was heard, so the local transcript matches the user's experience.
-    const full = this.#untruncated.get(itemId) ?? item.text;
-    this.#untruncated.set(itemId, full);
-    item.text = full.slice(0, Math.round(full.length * (audioEndMs / audio.receivedMs)));
-    item.truncated = true;
-    this.#emitter.emit({ type: 'transcript', role: 'agent', itemId, text: item.text, final: true });
   }
 
   #callInfo(record: CallRecord): ToolCallInfo {

@@ -1,6 +1,6 @@
 # vRT protocol, version 1
 
-Revision 1.3, 2026-10-19. Status: draft until the conformance suite (`conformance/`) ships.
+Revision 1.4, 2026-10-20. Status: draft until the conformance suite (`conformance/`) ships.
 
 This document defines the vRealTime (vRT) wire protocol between a **client** (an app or device that hosts tools and, optionally, audio input and output) and a **server** (which runs the agent and talks to the model). It is normative together with the JSON Schemas in [`schema/`](schema/). Where this document and a schema disagree about the structure of a message, the schema wins; this document defines everything a schema cannot: ordering, state and behaviour.
 
@@ -411,7 +411,7 @@ Because `audio.start` is transient, a resumed connection starts without a curren
 
 A client SHOULD stop playback and discard buffered output audio as soon as the user starts speaking, either detected locally or reported by `turn.state` `listening`, and on any interruption.
 
-When playback of an item stops before its end, the client SHOULD send `playback` with the item's `itemId` and `playedMs`, the milliseconds of that item actually played, for each item it played in part. The server uses it to truncate the conversation to what the user heard.
+When playback stops before the end of the audio it received, the client SHOULD send `playback` with an item's `itemId` and `playedMs`, the milliseconds of that item actually played, for each item it played in part, and with `playedMs` 0 for each item it received but did not start playing. The server uses it to truncate the conversation to what the user heard. A server SHOULD treat output audio it could not deliver, because it dropped the item's `audio.start` or no connection was attached, as played for 0 milliseconds.
 
 ## 9. Errors
 
@@ -495,6 +495,10 @@ This version sets no maximum message size, tool count or queue length. Implement
 | server | `error` | sessionless | Something went wrong | [error](schema/server/error.json) |
 
 ## Appendix B. Revision history
+
+**1.4** (2026-10-20)
+
+- Clarified `playback` (§8.4): a client also reports items it received but did not start playing, with `playedMs` 0, and a server treats output audio it could not deliver as not heard. No message or schema changes.
 
 **1.3** (2026-10-19)
 

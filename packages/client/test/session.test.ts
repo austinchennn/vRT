@@ -375,6 +375,14 @@ describe('audio output', () => {
     expect(enqueued).toHaveLength(1);
   });
 
+  it('reports an item it received but never started playing as playedMs 0', async () => {
+    const sink: AudioSink = { enqueue: () => {}, flush: async () => ({ a1: 10, a2: 0 }), close: async () => {} };
+    const { session, socket } = await start({ audio: { output: sink } });
+    session.interrupt();
+    await flush();
+    expect(socket.ofType('playback')).toMatchObject([{ itemId: 'a1', playedMs: 10 }, { itemId: 'a2', playedMs: 0 }]);
+  });
+
   it('barge-in: a listening state flushes playback at once', async () => {
     const { sink } = fakeSink();
     const flushSpy = vi.spyOn(sink, 'flush');

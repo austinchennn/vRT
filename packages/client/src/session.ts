@@ -474,9 +474,8 @@ export class ClientSession {
   async #flushPlayback(): Promise<void> {
     if (!this.#speaker) return;
     const played = await this.#speaker.flush();
-    for (const [itemId, playedMs] of Object.entries(played)) {
-      if (playedMs > 0) this.#send({ type: 'playback', itemId, playedMs: Math.round(playedMs) });
-    }
+    // Items played not at all are reported too, with 0, so the server can drop what nobody heard.
+    for (const [itemId, playedMs] of Object.entries(played)) this.#send({ type: 'playback', itemId, playedMs: Math.round(playedMs) });
   }
 
   async #startAudio(): Promise<void> {

@@ -288,6 +288,37 @@ describe('audio, interrupt and playback', () => {
     expect(client.socket.frames().map((f) => f.payload[0])).toEqual([0, 1, 2]);
     expect(client.socket.ofType('interrupted')).toHaveLength(1);
   });
+
+  it('reports audio it dropped before announcing it as not heard', async () => {
+    const { model, connect } = setup({}, { highWaterMark: 100 });
+    const client = connect();
+    const { fake } = await ready(model, client);
+    fake.emit({ type: 'input.speech.start', atMs: 0 });
+    fake.emit({ type: 'response.start', responseId: 'r1' });
+    fake.emit({ type: 'output.audio', responseId: 'r1', itemId: 'a1', chunk: { data: new Uint8Array(480), format: pcm24 } });
+    client.socket.bufferedAmount = 1000;
+    fake.emit({ type: 'output.audio', responseId: 'r1', itemId: 'a2', chunk: { data: new Uint8Array(480), format: pcm24 } });
+    client.send({ type: 'interrupt', epoch: client.socket.ofType('audio.start')[0]!.epoch, reason: 'user' });
+    // a2 never reached the client, so nothing of it was heard; a1 is the client's to report.
+    expect(fake.commandsOf('truncate')).toEqual([{ type: 'truncate', itemId: 'a2', audioEndMs: 0 }]);
+  });
+
+  it('reports audio produced while no client is attached as not heard', async () => {
+    const { model, connect } = setup();
+    const client = connect();
+    const { fake } = await ready(model, client);
+    fake.emit({ type: 'input.speech.start', atMs: 0 });
+    fake.emit({ type: 'input.speech.end', atMs: 0 });
+    fake.emit({ type: 'response.start', responseId: 'r1' });
+    client.connection.closed();
+    fake.emit({ type: 'output.audio', responseId: 'r1', itemId: 'a1', chunk: { data: new Uint8Array(480), format: pcm24 } });
+    fake.emit({ type: 'output.audio', responseId: 'r1', itemId: 'a1', chunk: { data: new Uint8Array(480), format: pcm24 } });
+    fake.emit({ type: 'response.end', responseId: 'r1', status: 'done' });
+    expect(fake.commandsOf('truncate')).toEqual([]);
+    // When the user next takes the floor, the reply nobody heard is cut to nothing.
+    fake.emit({ type: 'input.speech.start', atMs: 0 });
+    expect(fake.commandsOf('truncate')).toEqual([{ type: 'truncate', itemId: 'a1', audioEndMs: 0 }]);
+  });
 });
 
 describe('resume and heartbeat', () => {
