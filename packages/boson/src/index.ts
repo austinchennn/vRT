@@ -1,5 +1,5 @@
 import type { AudioFormat, Capabilities, RealtimeModel, SessionConfig } from '@vrealtime/core';
-import { createCompatibleModel, type SocketFactory } from '@vrealtime/openai-compatible';
+import { createCompatibleModel, type CloseContext, type CloseDescription, type SocketFactory } from '@vrealtime/openai-compatible';
 
 export { fetchSocket } from '@vrealtime/openai-compatible';
 export type { ProviderSocket, SocketFactory } from '@vrealtime/openai-compatible';
@@ -36,6 +36,30 @@ export const BOSON_CAPABILITIES: Capabilities = {
 
 const EXTENSIONS = ['conversation.context.summarized', 'session.idle_timeout', 'session.max_duration_reached'];
 
+/**
+ * Boson's WebSocket close codes, surfaced as the close error's `code`.
+ * See https://docs.boson.ai/api-reference/realtime/overview.md.
+ */
+function describeBosonClose({ code, lastError, lastExtension }: CloseContext): CloseDescription | undefined {
+  switch (code) {
+    case 1013:
+      return { code: 'max_concurrency', message: 'max concurrency exceeded, retry later' };
+    case 3000:
+      return { code: 'invalid_api_key', message: 'invalid API key or invalid/expired ephemeral key' };
+    case 4429:
+      // Always preceded by an `insufficient_quota` error event carrying the upstream message.
+      return {
+        code: 'insufficient_quota',
+        type: 'insufficient_quota',
+        message: lastError?.type === 'insufficient_quota' && lastError.message ? lastError.message : 'billing entitlement refused',
+      };
+    case 1000:
+      if (lastExtension === 'session.idle_timeout') return { code: 'session_idle_timeout', type: 'session_limit', message: 'no user speech for the idle window' };
+      if (lastExtension === 'session.max_duration_reached') return { code: 'session_max_duration', type: 'session_limit', message: 'maximum session duration reached' };
+  }
+  return undefined;
+}
+
 function envKey(): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
   return env?.['BOSON_API_KEY'];
@@ -63,6 +87,9 @@ export function boson(options: BosonOptions = {}): RealtimeModel {
     defaults,
     transcriptionModel: 'higgs-stt-3.1',
     extensions: EXTENSIONS,
+    // Boson sends nothing on connect and acks the first `session.update` with `session.created`.
+    readyOn: 'session.created',
+    describeClose: describeBosonClose,
     ...(options.socket ? { socket: options.socket } : {}),
   });
 }

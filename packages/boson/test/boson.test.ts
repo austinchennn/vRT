@@ -2,7 +2,7 @@ import type { RealtimeEvent, RealtimeSession } from '@vrealtime/core';
 import { fromBase64, toBase64 } from '@vrealtime/core';
 import { describe, expect, it } from 'vitest';
 import { BOSON_REALTIME_URL, boson, type ProviderSocket } from '../src/index.js';
-import { MAX_APPEND_BYTES } from '@vrealtime/openai-compatible';
+import { FINAL_TRANSCRIPT_MEMORY, MAX_APPEND_BYTES } from '@vrealtime/openai-compatible';
 
 type Listener = (event: { data?: unknown; code?: number; reason?: string }) => void;
 
@@ -180,40 +180,124 @@ describe('boson events', () => {
   it('normalizes a full response with audio, transcripts and a tool call', async () => {
     const { socket, events } = await connect();
     const audio = new Uint8Array(960).fill(1);
+    // Boson's real order, per the recorded session in boson-ai/higgs-realtime-tutorial
+    // (test/fixtures/three-turn.json): no event on connect, `session.created` acks the
+    // first session.update, the user transcript lands after response.created and twice.
+    const part = { response_id: 'resp_1', item_id: 'a1', output_index: 0, content_index: 0 };
+    const call = { type: 'function_call', id: 'f1', call_id: 'call_1', name: 'paint' };
     const fixtures = [
-      { type: 'session.created', session: { id: 'sess_1' } },
-      { type: 'session.updated', session: { id: 'sess_1' } },
-      { type: 'session.updated', session: { id: 'sess_1' } },
-      { type: 'input_audio_buffer.speech_started', audio_start_ms: 100, item_id: 'u1' },
-      { type: 'input_audio_buffer.speech_stopped', audio_end_ms: 900, item_id: 'u1' },
-      { type: 'conversation.item.input_audio_transcription.delta', item_id: 'u1', delta: 'make it ' },
-      { type: 'conversation.item.input_audio_transcription.delta', item_id: 'u1', delta: 'red' },
-      { type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', transcript: 'make it red' },
-      { type: 'response.created', response: { id: 'resp_1' } },
-      { type: 'response.output_audio_transcript.delta', response_id: 'resp_1', item_id: 'a1', delta: 'Sure' },
-      { type: 'response.output_audio.delta', response_id: 'resp_1', item_id: 'a1', delta: toBase64(audio) },
-      { type: 'response.output_text.delta', response_id: 'resp_1', item_id: 'a1', delta: 'txt' },
-      { type: 'response.output_item.added', response_id: 'resp_1', item: { type: 'function_call', call_id: 'call_1', name: 'paint' } },
-      { type: 'response.function_call_arguments.delta', response_id: 'resp_1', call_id: 'call_1', delta: '{"color"' },
-      { type: 'response.function_call_arguments.done', response_id: 'resp_1', call_id: 'call_1', name: 'paint', arguments: '{"color":"red"}' },
-      { type: 'response.done', response: { id: 'resp_1', status: 'completed', usage: { input_tokens: 10, output_tokens: 20 } } },
-      { type: 'rate_limits.updated' },
+      { type: 'session.created', session: { id: 'sess_1', object: 'realtime.session', model: 'higgs-realtime' } },
+      { type: 'input_audio_buffer.speech_started', item_id: 'u1', audio_start_ms: 100 },
+      { type: 'input_audio_buffer.speech_stopped', item_id: 'u1', audio_end_ms: 900 },
+      { type: 'input_audio_buffer.committed', previous_item_id: null, item_id: 'u1' },
+      { type: 'conversation.item.added', previous_item_id: null, item: { id: 'u1', type: 'message', role: 'user', status: 'completed', content: [{ type: 'input_audio', audio: '' }] } },
+      { type: 'response.created', response: { id: 'resp_1', object: 'realtime.response', status: 'in_progress', output: [], usage: null, metadata: null } },
+      { type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', content_index: 0, transcript: 'make it red' },
+      { type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', content_index: 0, transcript: 'make it red' },
+      { type: 'response.output_item.added', response_id: 'resp_1', output_index: 0, item: { id: 'a1', type: 'message', role: 'assistant', status: 'in_progress', content: [] } },
+      { type: 'conversation.item.added', previous_item_id: 'u1', item: { id: 'a1', type: 'message', role: 'assistant', status: 'in_progress', content: [] } },
+      { type: 'response.content_part.added', ...part, part: { type: 'audio', audio: null, transcript: '' } },
+      { type: 'response.output_audio_transcript.delta', ...part, delta: 'Sure' },
+      { type: 'response.output_audio.delta', ...part, delta: toBase64(audio) },
+      // Undocumented extension in the recording; must be tolerated.
+      { type: 'response.output_audio_transcript.length', ...part, delta: 'Sure', length_ms: 20 },
+      { type: 'response.output_audio_transcript.done', ...part, transcript: 'Sure' },
+      { type: 'response.output_audio.done', ...part },
+      { type: 'response.content_part.done', ...part, part: { type: 'audio', audio: null, transcript: 'Sure' } },
+      { type: 'response.output_item.done', response_id: 'resp_1', output_index: 0, item: { id: 'a1', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'audio', transcript: 'Sure' }] } },
+      { type: 'response.output_item.added', response_id: 'resp_1', output_index: 1, item: { ...call, arguments: '', status: 'in_progress' } },
+      { type: 'response.function_call_arguments.delta', response_id: 'resp_1', item_id: 'f1', output_index: 1, call_id: 'call_1', delta: '{"color"' },
+      { type: 'response.function_call_arguments.done', response_id: 'resp_1', item_id: 'f1', output_index: 1, call_id: 'call_1', name: 'paint', arguments: '{"color":"red"}' },
+      { type: 'response.output_item.done', response_id: 'resp_1', output_index: 1, item: { ...call, arguments: '{"color":"red"}', status: 'completed' } },
+      {
+        type: 'response.done',
+        response: {
+          id: 'resp_1', object: 'realtime.response', status: 'completed', status_details: null, output: [], metadata: null,
+          usage: { total_tokens: 100, input_tokens: 84, output_tokens: 16, input_token_details: { cached_tokens: 0 } },
+        },
+      },
     ];
     for (const fixture of fixtures) socket.server(fixture);
     expect(events).toEqual([
       { type: 'session.ready', sessionId: 'sess_1' },
       { type: 'input.speech.start', atMs: 100 },
       { type: 'input.speech.end', atMs: 900 },
-      { type: 'input.transcript', itemId: 'u1', text: 'make it ', final: false },
-      { type: 'input.transcript', itemId: 'u1', text: 'make it red', final: false },
-      { type: 'input.transcript', itemId: 'u1', text: 'make it red', final: true },
       { type: 'response.start', responseId: 'resp_1' },
+      { type: 'input.transcript', itemId: 'u1', text: 'make it red', final: true },
       { type: 'output.transcript', responseId: 'resp_1', itemId: 'a1', delta: 'Sure' },
       { type: 'output.audio', responseId: 'resp_1', itemId: 'a1', chunk: { data: audio, format: pcm24, durationMs: 20 } },
-      { type: 'output.text', responseId: 'resp_1', delta: 'txt' },
       { type: 'tool.call.delta', responseId: 'resp_1', callId: 'call_1', name: 'paint', argumentsDelta: '{"color"' },
       { type: 'tool.call', responseId: 'resp_1', callId: 'call_1', name: 'paint', arguments: { color: 'red' } },
-      { type: 'response.end', responseId: 'resp_1', status: 'done', usage: { inputTokens: 10, outputTokens: 20 } },
+      { type: 'response.end', responseId: 'resp_1', status: 'done', usage: { inputTokens: 84, outputTokens: 16 } },
+    ]);
+  });
+
+  it('emits session.ready once, on the session.created ack of the first session.update', async () => {
+    const { socket, session, events } = await connect();
+    expect(socket.sentOf('session.update')).toHaveLength(1);
+    expect(events).toEqual([]);
+    socket.server({ type: 'session.created', session: { id: 'sess_b', object: 'realtime.session' } });
+    expect(events).toEqual([{ type: 'session.ready', sessionId: 'sess_b' }]);
+    // Later updates are acked with session.updated and must not re-announce readiness.
+    await session.update({ instructions: 'later' });
+    socket.server({ type: 'session.updated', session: { id: 'sess_b', object: 'realtime.session' } });
+    expect(events).toHaveLength(1);
+  });
+
+  it('emits one final transcript per user item although Boson repeats completed', async () => {
+    const { socket, events } = await connect();
+    const completed = (itemId: string, transcript: string) =>
+      socket.server({ type: 'conversation.item.input_audio_transcription.completed', item_id: itemId, content_index: 0, transcript });
+    completed('u1', 'Hi. My name is Sam.');
+    completed('u1', 'Hi. My name is Sam.');
+    completed('u2', 'What is my name?');
+    completed('u2', 'What is my name?');
+    expect(events).toEqual([
+      { type: 'input.transcript', itemId: 'u1', text: 'Hi. My name is Sam.', final: true },
+      { type: 'input.transcript', itemId: 'u2', text: 'What is my name?', final: true },
+    ]);
+    // Memory is bounded: only the most recent items are remembered.
+    for (let i = 0; i < FINAL_TRANSCRIPT_MEMORY; i++) completed(`x${i}`, 'x');
+    events.length = 0;
+    completed('u1', 'evicted');
+    completed(`x${FINAL_TRANSCRIPT_MEMORY - 1}`, 'x');
+    expect(events).toEqual([{ type: 'input.transcript', itemId: 'u1', text: 'evicted', final: true }]);
+  });
+
+  it('maps Boson close codes to error codes', async () => {
+    const closeError = async (code: number, ...before: Record<string, unknown>[]) => {
+      const { socket, events } = await connect();
+      for (const message of before) socket.server(message);
+      socket.drop(code, '');
+      const last = events.at(-1);
+      expect(last).toMatchObject({ type: 'error', recoverable: false });
+      const { message, code: errorCode, providerType } = (last as { error: Error & { code?: string; providerType?: string } }).error;
+      return { message, code: errorCode, providerType };
+    };
+    expect(await closeError(1013)).toMatchObject({ code: 'max_concurrency', message: expect.stringContaining('retry later') });
+    expect(await closeError(3000)).toMatchObject({ code: 'invalid_api_key' });
+    const quota = { type: 'error', error: { type: 'insufficient_quota', code: null, message: 'Spending cap reached', param: null } };
+    expect(await closeError(4429, quota)).toEqual({
+      code: 'insufficient_quota',
+      providerType: 'insufficient_quota',
+      message: 'boson connection closed (4429): Spending cap reached',
+    });
+    expect(await closeError(1000, { type: 'session.idle_timeout', seconds_idle: 300 })).toMatchObject({ code: 'session_idle_timeout', providerType: 'session_limit' });
+    expect(await closeError(1000, { type: 'session.max_duration_reached', max_duration_sec: 3600 }, { type: 'response.done', response: { id: 'r', status: 'cancelled' } }))
+      .toMatchObject({ code: 'session_max_duration', providerType: 'session_limit' });
+    expect(await closeError(1000)).toEqual({ code: undefined, providerType: undefined, message: 'boson connection closed (1000)' });
+  });
+
+  it('maps text-only responses', async () => {
+    const { socket, events } = await connect();
+    socket.server({ type: 'response.created', response: { id: 'resp_t', status: 'in_progress' } });
+    socket.server({ type: 'response.output_text.delta', response_id: 'resp_t', item_id: 't1', output_index: 0, content_index: 0, delta: 'Hello' });
+    socket.server({ type: 'response.output_text.done', response_id: 'resp_t', output_index: 0, content_index: 0, text: 'Hello' });
+    socket.server({ type: 'response.done', response: { id: 'resp_t', status: 'completed' } });
+    expect(events).toEqual([
+      { type: 'response.start', responseId: 'resp_t' },
+      { type: 'output.text', responseId: 'resp_t', delta: 'Hello' },
+      { type: 'response.end', responseId: 'resp_t', status: 'done' },
     ]);
   });
 

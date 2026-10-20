@@ -83,6 +83,25 @@ describe('openai', () => {
     expect(events[3]).toMatchObject({ chunk: { durationMs: 10 } });
   });
 
+  it('waits for the session.updated ack and accumulates user transcript deltas', async () => {
+    const { socket, session, events } = await connect();
+    const transcripts: RealtimeEvent[] = [];
+    session.on('input.transcript', (e) => transcripts.push(e));
+    socket.server({ type: 'session.created', session: { id: 'sess_o' } });
+    expect(events).toEqual([]);
+    socket.server({ type: 'session.updated', session: { id: 'sess_o' } });
+    socket.server({ type: 'session.updated', session: { id: 'sess_o' } });
+    expect(events).toEqual([{ type: 'session.ready', sessionId: 'sess_o' }]);
+    socket.server({ type: 'conversation.item.input_audio_transcription.delta', item_id: 'u', delta: 'make it ' });
+    socket.server({ type: 'conversation.item.input_audio_transcription.delta', item_id: 'u', delta: 'red' });
+    socket.server({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'u', transcript: 'make it red' });
+    expect(transcripts).toEqual([
+      { type: 'input.transcript', itemId: 'u', text: 'make it ', final: false },
+      { type: 'input.transcript', itemId: 'u', text: 'make it red', final: false },
+      { type: 'input.transcript', itemId: 'u', text: 'make it red', final: true },
+    ]);
+  });
+
   it('declares no Opus and no auto-reply after tool results', () => {
     expect(OPENAI_CAPABILITIES.input.formats.some((f) => f.encoding === 'opus')).toBe(false);
     expect(OPENAI_CAPABILITIES.tools.autoReplyAfterResult).toBe(false);

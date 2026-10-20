@@ -68,11 +68,37 @@ export interface CompatibleOptions {
   transcriptionModel: string;
   /** Provider-specific server events surfaced as `extension` events. */
   extensions?: readonly string[];
+  /**
+   * Server event that acknowledges the first `session.update` and emits `session.ready`.
+   * OpenAI sends `session.created` on connect, so its ack is `session.updated` (the default).
+   */
+  readyOn?: 'session.created' | 'session.updated';
+  /** Maps an unexpected socket close to a provider error; `undefined` keeps the generic one. */
+  describeClose?: (close: CloseContext) => CloseDescription | undefined;
   socket?: SocketFactory;
+}
+
+/** What the session saw up to an unexpected socket close. */
+export interface CloseContext {
+  code: number | undefined;
+  reason: string | undefined;
+  /** Payload of the last `error` event (`type`, `code`, `message`). */
+  lastError: { type?: string; code?: string; message?: string } | undefined;
+  /** Type of the last extension event, e.g. `session.idle_timeout`. */
+  lastExtension: string | undefined;
+}
+
+/** Attached to the close error as `code` and `providerType`, like `error` events. */
+export interface CloseDescription {
+  code: string;
+  type?: string;
+  message: string;
 }
 
 /** One provider `input_audio_buffer.append` must stay under 1 MiB; base64 grows 4/3, so cap raw bytes (even, for PCM16). */
 export const MAX_APPEND_BYTES = 785_408;
+/** Recent user items whose final transcript was emitted; a repeat `completed` for one of them is dropped. */
+export const FINAL_TRANSCRIPT_MEMORY = 64;
 const OPEN = 1;
 const DEFAULT_FORMAT: AudioFormat = { encoding: 'pcm16', sampleRate: 24000, channels: 1 };
 
@@ -150,8 +176,11 @@ export class CompatibleSession implements RealtimeSession {
   #ready = false;
   #closing = false;
   #closed = false;
+  #lastError: CloseContext['lastError'];
+  #lastExtension: string | undefined;
   readonly #callNames = new Map<string, string>();
   readonly #userTranscripts = new Map<string, string>();
+  readonly #finalTranscripts = new Set<string>();
 
   constructor(socket: ProviderSocket, config: SessionConfig, options: CompatibleOptions) {
     this.#socket = socket;
@@ -251,7 +280,13 @@ export class CompatibleSession implements RealtimeSession {
   #onClose(code: number | undefined, reason: string | undefined): void {
     const expected = this.#closing;
     this.#closed = true;
-    if (!expected) this.#emit({ type: 'error', error: new Error(`${this.#options.provider} connection closed (${code ?? 'no code'}${reason ? `: ${reason}` : ''})`), recoverable: false });
+    if (expected) return;
+    const message = `${this.#options.provider} connection closed (${code ?? 'no code'}${reason ? `: ${reason}` : ''})`;
+    const described = this.#options.describeClose?.({ code, reason, lastError: this.#lastError, lastExtension: this.#lastExtension });
+    const error = described
+      ? Object.assign(new Error(`${message}: ${described.message}`), { code: described.code, providerType: described.type })
+      : new Error(message);
+    this.#emit({ type: 'error', error, recoverable: false });
   }
 
   #onMessage(raw: unknown): void {
@@ -266,10 +301,9 @@ export class CompatibleSession implements RealtimeSession {
     const type = message['type'] as string;
     switch (type) {
       case 'session.created':
-        this.#sessionId = message['session']?.id ?? this.#sessionId;
-        return;
       case 'session.updated':
-        if (!this.#ready) {
+        if (type === 'session.created') this.#sessionId = message['session']?.id ?? this.#sessionId;
+        if (!this.#ready && type === (this.#options.readyOn ?? 'session.updated')) {
           this.#ready = true;
           this.#emit({ type: 'session.ready', sessionId: this.#sessionId || message['session']?.id || '' });
         }
@@ -287,10 +321,16 @@ export class CompatibleSession implements RealtimeSession {
         this.#emit({ type: 'input.transcript', itemId, text, final: false });
         return;
       }
-      case 'conversation.item.input_audio_transcription.completed':
-        this.#userTranscripts.delete(message['item_id']);
-        this.#emit({ type: 'input.transcript', itemId: message['item_id'], text: message['transcript'] ?? '', final: true });
+      case 'conversation.item.input_audio_transcription.completed': {
+        // Boson repeats `completed` for the same item; core expects one final per item.
+        const itemId = message['item_id'] as string;
+        this.#userTranscripts.delete(itemId);
+        if (this.#finalTranscripts.has(itemId)) return;
+        this.#finalTranscripts.add(itemId);
+        if (this.#finalTranscripts.size > FINAL_TRANSCRIPT_MEMORY) this.#finalTranscripts.delete(this.#finalTranscripts.values().next().value!);
+        this.#emit({ type: 'input.transcript', itemId, text: message['transcript'] ?? '', final: true });
         return;
+      }
       case 'response.created':
         this.#emit({ type: 'response.start', responseId: message['response']?.id });
         return;
@@ -352,12 +392,16 @@ export class CompatibleSession implements RealtimeSession {
       }
       case 'error': {
         const detail = message['error'] ?? {};
+        this.#lastError = { type: detail.type, code: detail.code, message: detail.message };
         const error = Object.assign(new Error(detail.message ?? 'Provider error'), { code: detail.code, providerType: detail.type });
         this.#emit({ type: 'error', error, recoverable: true });
         return;
       }
       default:
-        if (this.#options.extensions?.includes(type)) this.#emit({ type: 'extension', name: type, data: message });
+        if (this.#options.extensions?.includes(type)) {
+          this.#lastExtension = type;
+          this.#emit({ type: 'extension', name: type, data: message });
+        }
     }
   }
 }
