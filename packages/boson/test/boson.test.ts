@@ -228,7 +228,7 @@ describe('boson events', () => {
       { type: 'output.audio', responseId: 'resp_1', itemId: 'a1', chunk: { data: audio, format: pcm24, durationMs: 20 } },
       { type: 'tool.call.delta', responseId: 'resp_1', callId: 'call_1', name: 'paint', argumentsDelta: '{"color"' },
       { type: 'tool.call', responseId: 'resp_1', callId: 'call_1', name: 'paint', arguments: { color: 'red' } },
-      { type: 'response.end', responseId: 'resp_1', status: 'done', usage: { inputTokens: 84, outputTokens: 16 } },
+      { type: 'response.end', responseId: 'resp_1', status: 'done', usage: { inputTokens: 84, outputTokens: 16, cachedInputTokens: 0 } },
     ]);
   });
 

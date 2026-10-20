@@ -24,6 +24,7 @@ import {
   type RespondOptions,
   type ResponseStatus,
   type SessionConfig,
+  type Usage,
 } from '@vrealtime/core';
 
 /** The subset of WebSocket the adapter needs; Node 22+, Bun, Deno and browsers all provide it. */
@@ -174,6 +175,12 @@ function responseStatus(response: { status?: string; status_details?: { reason?:
 
 function sameFormat(a: AudioFormat, b: AudioFormat): boolean {
   return a.encoding === b.encoding && (a.encoding !== 'pcm16' || (b.encoding === 'pcm16' && a.sampleRate === b.sampleRate));
+}
+
+function usageOf(usage: Json | null | undefined): Usage | undefined {
+  if (!usage) return undefined;
+  const cached = usage['input_token_details']?.['cached_tokens'];
+  return { inputTokens: usage['input_tokens'], outputTokens: usage['output_tokens'], ...(typeof cached === 'number' ? { cachedInputTokens: cached } : {}) };
 }
 
 function closeCode(tables: ErrorTables | undefined, code: number | undefined): RealtimeErrorCode | undefined {
@@ -416,13 +423,8 @@ export class CompatibleSession implements RealtimeSession {
       }
       case 'response.done': {
         const response = message['response'];
-        const usage = response?.usage;
-        this.#emit({
-          type: 'response.end',
-          responseId: response?.id,
-          status: responseStatus(response),
-          ...(usage ? { usage: { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } } : {}),
-        });
+        const usage = usageOf(response?.usage);
+        this.#emit({ type: 'response.end', responseId: response?.id, status: responseStatus(response), ...(usage ? { usage } : {}) });
         return;
       }
       case 'error': {

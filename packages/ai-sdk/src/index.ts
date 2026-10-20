@@ -83,6 +83,7 @@ export function aiSdk(model: LanguageModel, options: AiSdkOptions = {}): TextMod
               usage: {
                 ...(part.totalUsage.inputTokens !== undefined ? { inputTokens: part.totalUsage.inputTokens } : {}),
                 ...(part.totalUsage.outputTokens !== undefined ? { outputTokens: part.totalUsage.outputTokens } : {}),
+                ...(part.totalUsage.inputTokenDetails?.cacheReadTokens !== undefined ? { cachedInputTokens: part.totalUsage.inputTokenDetails.cacheReadTokens } : {}),
               },
             };
             break;

@@ -74,6 +74,13 @@ describe('aiSdk', () => {
     expect(prompt[1]).toMatchObject({ role: 'user', content: [{ type: 'text', text: 'hi' }] });
   });
 
+  it('reports input tokens read from the prompt cache', async () => {
+    const cached = { ...usage, inputTokens: { total: 11, noCache: 7, cacheRead: 4, cacheWrite: undefined } };
+    const turn = [...textTurn('Hi.').slice(0, -1), { type: 'finish', usage: cached, finishReason: { unified: 'stop', raw: 'stop' } }] as StreamPart[];
+    const parts = await collect(aiSdk(mockModel(turn)).stream({ messages: [{ role: 'user', content: 'hi' }], tools: [] }, { signal: new AbortController().signal }));
+    expect(parts.at(-1)).toEqual({ type: 'finish', usage: { inputTokens: 11, outputTokens: 7, cachedInputTokens: 4 } });
+  });
+
   it('declares tools from JSON Schema without executing them and streams tool calls', async () => {
     const model = mockModel(toolTurn);
     const parts = await collect(aiSdk(model).stream({

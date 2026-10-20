@@ -26,4 +26,18 @@ export interface Usage {
   outputAudioMs?: number;
   inputTokens?: number;
   outputTokens?: number;
+  /** Of `inputTokens`, how many the provider read from its prompt cache (usually billed lower). */
+  cachedInputTokens?: number;
+}
+
+const USAGE_FIELDS = ['inputAudioMs', 'outputAudioMs', 'inputTokens', 'outputTokens', 'cachedInputTokens'] as const;
+
+/** Field-by-field sum; a field is present when either side reports it. */
+export function addUsage(a: Usage | undefined, b: Usage): Usage {
+  const sum: Usage = { ...a };
+  for (const field of USAGE_FIELDS) {
+    const value = b[field];
+    if (value !== undefined) sum[field] = (sum[field] ?? 0) + value;
+  }
+  return sum;
 }

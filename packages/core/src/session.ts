@@ -2,7 +2,7 @@ import type { AgentDefinition, ToolCallInfo, Turn, TurnMetrics, TurnState } from
 import { pcm16DurationMs, type AudioChunk } from './audio.js';
 import { BoundedMap, BoundedSet } from './bounded.js';
 import { Emitter } from './emitter.js';
-import type { EventOf, RealtimeEvent } from './events.js';
+import { addUsage, type EventOf, type RealtimeEvent } from './events.js';
 import type { Capabilities, RealtimeSession, SessionConfig, ToolSpec } from './model.js';
 import { validateToolArgs, type Tool, type ToolResult } from './tool.js';
 import { ToolStreams, type ToolStreamEvent } from './tool-stream.js';
@@ -428,6 +428,8 @@ export class AgentSession {
   #onResponseEnd(event: EventOf<'response.end'>): void {
     const response = this.#responses.get(event.responseId);
     if (this.#openResponse === event.responseId) this.#openResponse = undefined;
+    // Billed whether or not it was kept: stale and cancelled responses count too.
+    if (event.usage) this.#metrics.usage = addUsage(this.#metrics.usage, event.usage);
     if (event.status === 'failed') this.#reportError(new Error(`Response ${event.responseId} failed`), true);
     if (response === undefined || response.epoch !== this.#epoch) {
       this.#forgetResponse(event.responseId);

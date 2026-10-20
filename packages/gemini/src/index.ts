@@ -82,7 +82,8 @@ export function setupMessage(model: string, config: SessionConfig): Json {
 
 function usageOf(metadata: Json | undefined): Usage | undefined {
   if (!metadata) return undefined;
-  return { inputTokens: metadata['promptTokenCount'], outputTokens: metadata['responseTokenCount'] };
+  const cached = metadata['cachedContentTokenCount'];
+  return { inputTokens: metadata['promptTokenCount'], outputTokens: metadata['responseTokenCount'], ...(typeof cached === 'number' ? { cachedInputTokens: cached } : {}) };
 }
 
 function rateOf(mimeType: string | undefined): number {
