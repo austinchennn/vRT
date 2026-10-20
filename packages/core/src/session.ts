@@ -71,6 +71,7 @@ export interface StartSessionOptions {
 const DEFAULT_CLIENT_TOOL_TIMEOUT_MS = 30_000;
 const FINISHED_RESPONSES_KEPT = 64;
 const TRAILING_AUDIO_KEPT = 16;
+const INTERRUPTED_ITEMS_KEPT = 16;
 
 interface CallRecord {
   callId: string;
@@ -162,7 +163,9 @@ export class AgentSession {
    * often ends long before the user has heard it all. Oldest first, as played.
    */
   readonly #trailingAudio = new Map<string, AudioItem>();
+  /** Playback reports, kept only for audio that may still be truncated. */
   readonly #played = new Map<string, number>();
+  /** Items cut short, oldest first; late reports on them truncate again. */
   readonly #interruptedItems = new Set<string>();
   readonly #transcript: TranscriptItem[] = [];
   readonly #transcriptIndex = new Map<string, TranscriptItem>();
@@ -250,6 +253,8 @@ export class AgentSession {
   /** Edge report of how much of an audio item the user actually heard. */
   playback(itemId: string, playedMs: number): void {
     if (this.#closed) return;
+    // Audio that can no longer be truncated has no use for its reports.
+    if (!this.#audioItems.has(itemId) && !this.#trailingAudio.has(itemId)) return;
     this.#played.set(itemId, playedMs);
     if (this.#interruptedItems.has(itemId)) this.#truncate(itemId);
     else this.#resolveTrailing(itemId, playedMs);
@@ -293,7 +298,7 @@ export class AgentSession {
     this.#awaitingResponse = false;
 
     for (const itemId of interruptedItems) {
-      this.#interruptedItems.add(itemId);
+      this.#markInterrupted(itemId);
       this.#truncate(itemId);
     }
     for (const record of interruptedCalls) {
@@ -716,7 +721,11 @@ export class AgentSession {
       this.#audioItems.delete(itemId);
       this.#trailingAudio.set(itemId, audio);
     }
-    while (this.#trailingAudio.size > TRAILING_AUDIO_KEPT) this.#trailingAudio.delete(this.#trailingAudio.keys().next().value!);
+    while (this.#trailingAudio.size > TRAILING_AUDIO_KEPT) {
+      const oldest = this.#trailingAudio.keys().next().value!;
+      this.#trailingAudio.delete(oldest);
+      this.#played.delete(oldest);
+    }
   }
 
   /** The user took the floor: trailing audio was heard only as far as the edge reports. */
@@ -738,10 +747,25 @@ export class AgentSession {
     const heardAll = Math.round(playedMs) >= Math.round(audio.receivedMs);
     if (!heardAll && !audio.cut) return;
     this.#trailingAudio.delete(itemId);
-    if (heardAll) return;
+    if (heardAll) {
+      this.#played.delete(itemId);
+      return;
+    }
     this.#audioItems.set(itemId, audio);
-    this.#interruptedItems.add(itemId);
+    this.#markInterrupted(itemId);
     this.#truncate(itemId);
+  }
+
+  /** Records an interrupted item, forgetting everything about the oldest beyond the ones kept. */
+  #markInterrupted(itemId: string): void {
+    this.#interruptedItems.add(itemId);
+    while (this.#interruptedItems.size > INTERRUPTED_ITEMS_KEPT) {
+      const oldest = this.#interruptedItems.values().next().value!;
+      this.#interruptedItems.delete(oldest);
+      this.#audioItems.delete(oldest);
+      this.#played.delete(oldest);
+      this.#untruncated.delete(oldest);
+    }
   }
 
   #truncate(itemId: string): void {
