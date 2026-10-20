@@ -1,6 +1,10 @@
 export type { AudioChunk, AudioFormat, Pcm16Rate } from './audio.js';
 export { Pcm16Resampler, fromBase64, pcm16DurationMs, resamplePcm16, toBase64 } from './audio.js';
+export { BoundedMap, BoundedSet } from './bounded.js';
 export { Emitter } from './emitter.js';
+export { RealtimeError, isRealtimeError } from './errors.js';
+export type { RealtimeErrorCode, RealtimeErrorOptions } from './errors.js';
+export { addUsage } from './events.js';
 export type { EventOf, EventType, RealtimeEvent, ResponseStatus, Usage } from './events.js';
 export type { Capabilities, RealtimeModel, RealtimeSession, RespondOptions, SessionConfig, ToolSpec } from './model.js';
 export { tool, validateToolArgs } from './tool.js';

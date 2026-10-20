@@ -1,7 +1,8 @@
 import type { AgentDefinition, ToolCallInfo, Turn, TurnMetrics, TurnState } from './agent.js';
 import { pcm16DurationMs, type AudioChunk } from './audio.js';
+import { BoundedMap, BoundedSet } from './bounded.js';
 import { Emitter } from './emitter.js';
-import type { EventOf, RealtimeEvent } from './events.js';
+import { addUsage, type EventOf, type RealtimeEvent } from './events.js';
 import type { Capabilities, RealtimeSession, SessionConfig, ToolSpec } from './model.js';
 import { validateToolArgs, type Tool, type ToolResult } from './tool.js';
 import { ToolStreams, type ToolStreamEvent } from './tool-stream.js';
@@ -147,7 +148,7 @@ export class AgentSession {
   #discardNextResponse = false;
   readonly #responses = new Map<string, ResponseRecord>();
   /** Recently finished responses; late events for them are stale, never live. */
-  readonly #finished = new Set<string>();
+  readonly #finished = new BoundedSet<string>(FINISHED_RESPONSES_KEPT);
 
   readonly #calls = new Map<string, CallRecord>();
   /** Provider identifiers are scoped to a response; public identities never expose or reuse them. */
@@ -161,7 +162,7 @@ export class AgentSession {
    * Audio of turns that ended while the edge may still be playing it: a response
    * often ends long before the user has heard it all. Oldest first, as played.
    */
-  readonly #trailingAudio = new Map<string, AudioItem>();
+  readonly #trailingAudio = new BoundedMap<string, AudioItem>(TRAILING_AUDIO_KEPT);
   readonly #played = new Map<string, number>();
   readonly #interruptedItems = new Set<string>();
   readonly #transcript: TranscriptItem[] = [];
@@ -427,6 +428,8 @@ export class AgentSession {
   #onResponseEnd(event: EventOf<'response.end'>): void {
     const response = this.#responses.get(event.responseId);
     if (this.#openResponse === event.responseId) this.#openResponse = undefined;
+    // Billed whether or not it was kept: stale and cancelled responses count too.
+    if (event.usage) this.#metrics.usage = addUsage(this.#metrics.usage, event.usage);
     if (event.status === 'failed') this.#reportError(new Error(`Response ${event.responseId} failed`), true);
     if (response === undefined || response.epoch !== this.#epoch) {
       this.#forgetResponse(event.responseId);
@@ -628,7 +631,6 @@ export class AgentSession {
     }
     this.#responses.delete(responseId);
     this.#finished.add(responseId);
-    if (this.#finished.size > FINISHED_RESPONSES_KEPT) this.#finished.delete(this.#finished.values().next().value!);
   }
 
   // ── Turns, transcript, truncation ───────────────────────────────────────
@@ -716,7 +718,6 @@ export class AgentSession {
       this.#audioItems.delete(itemId);
       this.#trailingAudio.set(itemId, audio);
     }
-    while (this.#trailingAudio.size > TRAILING_AUDIO_KEPT) this.#trailingAudio.delete(this.#trailingAudio.keys().next().value!);
   }
 
   /** The user took the floor: trailing audio was heard only as far as the edge reports. */

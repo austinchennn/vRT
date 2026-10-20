@@ -1,4 +1,4 @@
-import type { AudioFormat, Capabilities, RealtimeModel, SessionConfig } from '@vrealtime/core';
+import { RealtimeError, type AudioFormat, type Capabilities, type RealtimeModel, type SessionConfig } from '@vrealtime/core';
 import { createCompatibleModel, type SocketFactory } from '@vrealtime/openai-compatible';
 
 export { fetchSocket } from '@vrealtime/openai-compatible';
@@ -45,7 +45,7 @@ function envKey(): string | undefined {
 /** OpenAI Realtime (GA). */
 export function openai(options: OpenAIOptions = {}): RealtimeModel {
   const apiKey = options.apiKey ?? envKey();
-  if (!apiKey) throw new Error('openai: missing apiKey (or OPENAI_API_KEY)');
+  if (!apiKey) throw new RealtimeError('auth', 'openai: missing apiKey (or OPENAI_API_KEY)', { provider: 'openai' });
   const model = options.model ?? 'gpt-realtime-2';
   const defaults: SessionConfig = {
     turnDetection: options.turnDetection === undefined ? 'semantic' : options.turnDetection,

@@ -1,3 +1,4 @@
+import type { Usage } from './events.js';
 import type { RealtimeModel } from './model.js';
 import type { Tool, ToolResult, ToolRisk } from './tool.js';
 import type { VadFactory } from './vad.js';
@@ -21,6 +22,8 @@ export interface TurnMetrics {
   /** Interrupt signal → playback stopped and gate closed. */
   interruptLatencyMs?: number;
   toolCalls: number;
+  /** What the provider reported for the responses that ended during the turn, cancelled ones included. */
+  usage?: Usage;
 }
 
 export interface ToolCallInfo {

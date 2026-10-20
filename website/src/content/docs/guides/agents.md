@@ -85,9 +85,9 @@ defineAgent({
 | `beforeToolCall(call)` | Before any tool call, server or app | Return nothing or `{ action: 'allow' }`, `{ action: 'reject', message }`, or `{ action: 'rewrite', arguments }` |
 | `afterToolCall(call, result)` | After each call settles | Observe |
 | `onTurnStart(turn)` | A turn starts | Observe |
-| `onTurnEnd(turn, metrics)` | A turn ends | Observe metrics: time to first audio, time to first tool call, interrupt latency, tool calls |
+| `onTurnEnd(turn, metrics)` | A turn ends | Observe metrics: time to first audio, time to first tool call, interrupt latency, tool calls, and `usage` summed over the turn's responses |
 | `onTranscript(text, final, turn)` | User speech is transcribed | Observe |
-| `onError(error, recoverable)` | Something failed | Observe |
+| `onError(error, recoverable)` | Something failed | Observe; model errors are a `RealtimeError` with a provider-neutral `code` (see [Errors](/guides/models/#errors)) |
 
 `call` carries `callId`, `name`, `arguments`, `where` (`'server'` or `'client'`), `risk`, `turn` and `data`.
 

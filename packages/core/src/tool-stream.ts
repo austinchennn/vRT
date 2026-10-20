@@ -1,3 +1,4 @@
+import { BoundedSet } from './bounded.js';
 import type { ToolResult } from './tool.js';
 
 /** One step of a tool call's lifecycle. `settled`, `cancelled` and `failed` are terminal. */
@@ -38,7 +39,7 @@ const ENDED_CALLS_KEPT = 256;
  */
 export class ToolStreams {
   readonly #open = new Map<string, OpenCall>();
-  readonly #ended = new Set<string>();
+  readonly #ended = new BoundedSet<string>(ENDED_CALLS_KEPT);
   readonly #emit: (event: ToolStreamEvent) => void;
 
   constructor(emit: (event: ToolStreamEvent) => void) {
@@ -104,7 +105,6 @@ export class ToolStreams {
     if (!open) return;
     this.#open.delete(callId);
     this.#ended.add(callId);
-    if (this.#ended.size > ENDED_CALLS_KEPT) this.#ended.delete(this.#ended.values().next().value!);
     this.#send(open, step);
   }
 

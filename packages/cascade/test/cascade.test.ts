@@ -1,4 +1,4 @@
-import { defineAgent, startSession, tool, type AgentEvent, type AudioChunk, type Tool } from '@vrealtime/core';
+import { RealtimeError, defineAgent, startSession, tool, type AgentEvent, type AudioChunk, type Tool } from '@vrealtime/core';
 import { energyVad } from '@vrealtime/vad';
 import { describe, expect, it, vi } from 'vitest';
 import { SentenceBuffer, cascade, type ChatMessage, type SttModel, type TextModel, type TextPart, type TextRequest, type TtsModel } from '../src/index.js';
@@ -199,5 +199,20 @@ describe('cascade', () => {
     session.sendText('hi');
     await vi.waitFor(() => expect(events.some((e) => e.type === 'error' && e.error.message === 'rate limited')).toBe(true));
     await vi.waitFor(() => expect(session.state).toBe('idle'));
+    // A plain error from the text model becomes a `provider` RealtimeError that keeps it as the cause.
+    const error = events.find((e) => e.type === 'error')!;
+    expect(error).toMatchObject({ error: { name: 'RealtimeError', code: 'provider', provider: 'cascade', cause: { message: 'rate limited' } } });
+  });
+
+  it('keeps the code of a RealtimeError its text model throws', async () => {
+    const llm: TextModel = {
+      async *stream() {
+        throw new RealtimeError('quota', 'out of credits', { provider: 'anthropic' });
+      },
+    };
+    const { session, events } = await agentWith(cascade({ llm }));
+    session.sendText('hi');
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'error')).toBe(true));
+    expect(events.find((e) => e.type === 'error')).toMatchObject({ error: { code: 'quota', provider: 'anthropic', retryable: false } });
   });
 });

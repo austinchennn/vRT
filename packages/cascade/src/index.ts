@@ -1,6 +1,8 @@
 import {
+  BoundedMap,
   Emitter,
   Pcm16Resampler,
+  RealtimeError,
   pcm16DurationMs,
   type AudioChunk,
   type AudioFormat,
@@ -136,7 +138,7 @@ export class CascadeSession implements RealtimeSession {
   #inputMs = 0;
   #pending: Promise<void> = Promise.resolve();
   #response: ActiveResponse | undefined;
-  readonly #items = new Map<string, ActiveResponse>();
+  readonly #items = new BoundedMap<string, ActiveResponse>(KEPT_ITEMS);
   #responseCount = 0;
   #userCount = 0;
   /** Bumped when the user starts speaking: replies requested before that are dropped. */
@@ -168,11 +170,11 @@ export class CascadeSession implements RealtimeSession {
   sendAudio(chunk: AudioChunk): void {
     if (this.#closed) return;
     if (!this.#options.stt) {
-      this.#emit({ type: 'error', error: new Error('cascade: audio input needs an stt model'), recoverable: true });
+      this.#emit({ type: 'error', error: new RealtimeError('unsupported', 'cascade: audio input needs an stt model', { provider: 'cascade' }), recoverable: true });
       return;
     }
     if (chunk.format.encoding !== 'pcm16') {
-      this.#emit({ type: 'error', error: new Error(`cascade: ${chunk.format.encoding} input is not supported, send PCM16`), recoverable: true });
+      this.#emit({ type: 'error', error: new RealtimeError('unsupported', `cascade: ${chunk.format.encoding} input is not supported, send PCM16`, { provider: 'cascade' }), recoverable: true });
       return;
     }
     let data = chunk.data;
@@ -284,7 +286,7 @@ export class CascadeSession implements RealtimeSession {
   /** Keeps history updates in order behind pending transcriptions. */
   #after(run: () => void | Promise<void>): void {
     this.#pending = this.#pending.then(run).catch((error) => {
-      this.#emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)), recoverable: true });
+      this.#emit({ type: 'error', error: RealtimeError.from(error, 'provider', { provider: 'cascade' }), recoverable: true });
     });
   }
 
@@ -321,7 +323,7 @@ export class CascadeSession implements RealtimeSession {
   #start(options?: RespondOptions): void {
     if (this.#closed) return;
     if (this.#response) {
-      this.#emit({ type: 'error', error: new Error('cascade: a response is already in progress'), recoverable: true });
+      this.#emit({ type: 'error', error: new RealtimeError('invalid_request', 'cascade: a response is already in progress', { provider: 'cascade' }), recoverable: true });
       return;
     }
     const id = `cascade-response-${++this.#responseCount}`;
@@ -337,7 +339,6 @@ export class CascadeSession implements RealtimeSession {
     this.history.push(response.assistant);
     this.#response = response;
     this.#items.set(response.itemId, response);
-    if (this.#items.size > KEPT_ITEMS) this.#items.delete(this.#items.keys().next().value!);
     this.#emit({ type: 'response.start', responseId: id });
     void this.#run(response, messages, options);
   }
@@ -387,7 +388,8 @@ export class CascadeSession implements RealtimeSession {
     } catch (error) {
       if (signal.aborted) return;
       this.#response = undefined;
-      this.#emit({ type: 'error', error: error instanceof Error ? error : new Error(String(error)), recoverable: true });
+      // An stt, llm or tts model that already speaks RealtimeError keeps its code.
+      this.#emit({ type: 'error', error: RealtimeError.from(error, 'provider', { provider: 'cascade' }), recoverable: true });
       this.#emit({ type: 'response.end', responseId: response.id, status: 'failed' });
       return;
     }
