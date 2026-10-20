@@ -212,15 +212,21 @@ describe('hooks', () => {
     call(fake, 'r1', 'c1', 't');
     clock.advance(200);
     speak(fake, 'r1', 'a1', 20);
-    fake.emit({ type: 'response.end', responseId: 'r1', status: 'done' });
+    fake.emit({ type: 'response.end', responseId: 'r1', status: 'done', usage: { inputTokens: 10, outputTokens: 5, cachedInputTokens: 2 } });
     await flush();
     fake.emit({ type: 'response.start', responseId: 'r2' });
-    fake.emit({ type: 'response.end', responseId: 'r2', status: 'done' });
+    fake.emit({ type: 'response.end', responseId: 'r2', status: 'done', usage: { inputTokens: 20, outputTokens: 3 } });
     fake.emit({ type: 'error', error: new Error('x'), recoverable: true });
     expect(hooks.onTurnStart).toHaveBeenCalledTimes(1);
     expect(hooks.onTranscript).toHaveBeenCalledWith('hello', true, expect.objectContaining({ id: expect.any(String) }));
     expect(hooks.afterToolCall).toHaveBeenCalledWith(expect.objectContaining({ callId: expect.any(String), where: 'server' }), { ok: true, output: 'x' });
-    expect(hooks.onTurnEnd).toHaveBeenCalledWith(expect.objectContaining({ interrupted: false }), { toolCalls: 1, timeToFirstToolCallMs: 120, timeToFirstAudioMs: 320 });
+    // Usage adds up over every response of the turn: here the tool call's and the reply's.
+    expect(hooks.onTurnEnd).toHaveBeenCalledWith(expect.objectContaining({ interrupted: false }), {
+      toolCalls: 1,
+      timeToFirstToolCallMs: 120,
+      timeToFirstAudioMs: 320,
+      usage: { inputTokens: 30, outputTokens: 8, cachedInputTokens: 2 },
+    });
     expect(hooks.onError).toHaveBeenCalledWith(new Error('x'), true);
   });
 

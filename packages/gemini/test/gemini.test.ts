@@ -90,6 +90,8 @@ describe('gemini connect', () => {
     socket.open();
     socket.drop(1008, 'API key not valid');
     await expect(pending).rejects.toThrow(/1008: API key not valid/);
+    // Gemini's close codes are not mapped yet: the close stays a `connection` error with its code.
+    await expect(pending).rejects.toMatchObject({ name: 'RealtimeError', code: 'connection', provider: 'gemini', providerCode: '1008' });
   });
 
   it('text modality and manual turns change the setup', async () => {
@@ -142,6 +144,7 @@ describe('gemini input', () => {
   it('rejects mid-session config changes it cannot apply', async () => {
     const { session } = await connect();
     await expect(session.update({ instructions: 'x' })).rejects.toThrow(/after setup/);
+    await expect(session.update({ instructions: 'x' })).rejects.toMatchObject({ code: 'unsupported' });
     await expect(session.update({ inputFormat: { encoding: 'pcm16', sampleRate: 24000, channels: 1 } })).resolves.toBeUndefined();
   });
 });
@@ -153,13 +156,13 @@ describe('gemini output', () => {
     socket.server({ serverContent: { inputTranscription: { text: 'red' } } });
     socket.server({ serverContent: { modelTurn: { parts: [audioPart(960)] }, outputTranscription: { text: 'Sure' } } });
     socket.server({ serverContent: { modelTurn: { parts: [{ text: 'thinking...', thought: true }] } } });
-    socket.server({ serverContent: { turnComplete: true }, usageMetadata: { promptTokenCount: 5, responseTokenCount: 7 } });
+    socket.server({ serverContent: { turnComplete: true }, usageMetadata: { promptTokenCount: 5, responseTokenCount: 7, cachedContentTokenCount: 2 } });
     const types = events.map((e) => e.type);
     expect(types).toEqual(['session.ready', 'input.transcript', 'input.transcript', 'input.transcript', 'response.start', 'output.audio', 'output.transcript', 'response.end']);
     expect(events[3]).toEqual({ type: 'input.transcript', itemId: 'gemini-user-1', text: 'make it red', final: true });
     expect(events[5]).toMatchObject({ responseId: 'gemini-response-1', itemId: 'gemini-response-1-audio', chunk: { durationMs: 20, format: { sampleRate: 24000 } } });
     expect(fromBase64(toBase64((events[5] as { chunk: { data: Uint8Array } }).chunk.data)).byteLength).toBe(960);
-    expect(events.at(-1)).toEqual({ type: 'response.end', responseId: 'gemini-response-1', status: 'done', usage: { inputTokens: 5, outputTokens: 7 } });
+    expect(events.at(-1)).toEqual({ type: 'response.end', responseId: 'gemini-response-1', status: 'done', usage: { inputTokens: 5, outputTokens: 7, cachedInputTokens: 2 } });
   });
 
   it('maps interrupted to speech start plus an interrupted response', async () => {
@@ -198,6 +201,7 @@ describe('gemini output', () => {
     socket.server({ sessionResumptionUpdate: { newHandle: 'h', resumable: true } });
     socket.drop(1011, 'internal');
     expect(events.slice(-3).map((e) => (e.type === 'extension' ? e.name : e.type))).toEqual(['goAway', 'sessionResumptionUpdate', 'error']);
+    expect(events.at(-1)).toMatchObject({ recoverable: false, error: { code: 'connection', retryable: true, providerCode: '1011' } });
   });
 });
 

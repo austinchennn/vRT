@@ -36,6 +36,7 @@ vRealTime 的目标是让 AI 和工具去适应人的习惯：人用说话来操
 | **省** | 浏览器到服务端用二进制帧而不是 base64 JSON（体积小 33%，不用编解码）；可选 Opus（带宽约为 PCM 的 1/10） | 24 kHz PCM16 上行 ≤ 48 KB/s，Opus ≤ 4 KB/s |
 | **到处能跑** | 只用 Web 标准 API：WebSocket、fetch、AbortSignal、TypedArray、TextEncoder | Node 22+、Bun、Deno、Cloudflare Workers、浏览器使用同一套代码 |
 | **少概念** | 核心概念不超过 6 个；不引入链、图；状态机显式、小而可测 | `Session` 运行时 ≤ 1500 行 |
+| **有界** | 长会话里每个 item、每个调用的记录都放进 `BoundedMap` / `BoundedSet`，超出上限按插入顺序淘汰最旧的，不手写淘汰逻辑 | 内存不随会话时长增长 |
 | **薄客户端** | 协议只用 WebSocket、JSON 文本帧和二进制音频帧；客户端不做编排、不做模型适配 | 任一语言的客户端协议核心（不含音频采集播放）≤ 800 行；ESP32-S3 级别的单片机可以实现 |
 | **协议可演进** | 版本号加能力协商：`hello` 声明协议版本和可选能力；小版本只做增量，不破坏旧客户端 | 一致性测试覆盖每个协议版本 |
 
@@ -103,8 +104,8 @@ vRealTime 用**扁平事件 + `responseId`**，不按回复嵌套多层流：分
 | `output.text` / `output.transcript` | 文字增量；语音回复对应的字幕增量 |
 | `output.audio` | 音频块（`AudioChunk`） |
 | `tool.call.delta` / `tool.call` | 工具参数流式增量；参数完整的工具调用 |
-| `response.end` | 结束，`status` 为 `done`、`cancelled`、`interrupted` 或 `failed`，可带用量 |
-| `error` | 错误，带 `recoverable` |
+| `response.end` | 结束，`status` 为 `done`、`cancelled`、`interrupted` 或 `failed`，可带用量（`inputTokens`、`outputTokens`、`cachedInputTokens`） |
+| `error` | 错误，是 `RealtimeError`（见 3.4），带 `recoverable` |
 
 ### 3.2 能力声明与框架补位
 
@@ -127,6 +128,23 @@ interface Capabilities {
 - `AudioChunk = { data: Uint8Array; format: AudioFormat; durationMs?: number }`，`AudioFormat` 为 `pcm16`（带采样率）、`opus`、`pcmu` 之一。
 - **能透传就透传**：浏览器采集 Opus，服务端原样转给支持 Opus 的模型（Boson 支持），全程不解码。
 - 只有格式不匹配时才转换。core 提供一个很小的线性重采样器；Opus 编解码放在可选包里，不进 core。
+
+### 3.4 错误模型与用量
+
+各家的错误码不一样，开发者却只想写一份处理逻辑。所以 L1 把错误归一化：每个适配器发出或抛出的错误都是 `RealtimeError`。
+
+| 字段 | 含义 |
+|---|---|
+| `code` | 与供应商无关的类别：`auth`、`quota`、`rate_limited`、`overloaded`、`invalid_request`、`session_limit`、`connection`、`transcription`、`unsupported`、`provider` |
+| `retryable` | 原样重试（重发、重连）有没有可能成功；默认由 `code` 决定，适配器可以覆盖 |
+| `provider`、`providerCode` | 哪家供应商，以及它自己的错误码或 close code（如 `insufficient_quota`、`4429`） |
+| `cause` | 供应商的原始 payload 或底层错误，不丢信息 |
+
+`retryable` 和事件上的 `recoverable` 是两回事：`recoverable` 说的是当前会话还能不能继续，`retryable` 说的是再试一次有没有用。
+
+依赖方向保持不变：类别定义在 core，映射数据放在各自的适配器包里，core 不认识任何供应商的错误码。OpenAI 兼容的供应商用一张声明式的表（`ErrorTables`：`errorTypes`、`closeCodes`、`sessionLimitEvents`）描述自己和基类的差异；接入一家新的兼容供应商就是填一张表，不改共享代码。没映射到的错误事件归为 `provider`，意外断开归为 `connection`。供应商发出错误事件后紧接着断开时（如 Boson 的 4429），断开错误会带上那条错误事件的原文。
+
+用量同样归一化：`Usage.cachedInputTokens` 是 `inputTokens` 中命中供应商缓存的部分。L2 把一轮里所有结束的 response（包括被取消的）的用量加总，放进 `onTurnEnd` 的 `metrics.usage`。
 
 ## 4. L2 Agent 运行时
 
@@ -293,8 +311,10 @@ const model = cascade({
 | `response.start/end` | `response.created` / `response.done` |
 | `output.audio` / `output.transcript` / `output.text` | `response.output_audio.delta` / `response.output_audio_transcript.delta` / `response.output_text.delta` |
 | `tool.call.delta` / `tool.call` | `response.function_call_arguments.delta` / `.done` |
+| `session.ready` | 第一次 `session.update` 的确认 `session.created`（OpenAI 是 `session.updated`） |
+| `error`（`RealtimeError`） | `error.type` 按 OpenAI 的类型加 Boson 自有类型映射；close 1013 → `overloaded`，3000 → `auth`，4429 → `quota`；`session.idle_timeout` / `session.max_duration_reached` 之后的 1000 → `session_limit` |
 
-由于协议兼容，`@vrealtime/openai` 和 `@vrealtime/boson` 共享一个 `openai-compatible` 内部实现，各自只覆盖差异（端点、鉴权、扩展事件如 `conversation.context.summarized`）。
+由于协议兼容，`@vrealtime/openai` 和 `@vrealtime/boson` 共享一个 `openai-compatible` 内部实现，各自只用数据声明差异：端点、鉴权、扩展事件（如 `conversation.context.summarized`）、`readyOn` 和错误映射表 `ErrorTables`。
 
 ## 10. 包与依赖规则
 
