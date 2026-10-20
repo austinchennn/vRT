@@ -415,6 +415,82 @@ describe('truncation', () => {
     expect(session.transcript.find((t) => t.itemId === 'a1')).toEqual({ role: 'agent', itemId: 'a1', text: '01234', truncated: true });
     expect(ofType('transcript').filter((t) => t.final).map((t) => t.text)).toEqual(['012', '01234']);
   });
+
+  describe('audio still playing after its response ended', () => {
+    /** Models generate far faster than real time: 20 s of audio, done long before it is heard. */
+    async function heardLater(options: Setup = {}) {
+      const harness = await setup(options);
+      userTurn(harness.fake);
+      speak(harness.fake, 'r1', 'a1', 20000, '0123456789');
+      harness.fake.emit({ type: 'response.end', responseId: 'r1', status: 'done' });
+      expect(harness.session.state).toBe('idle');
+      return harness;
+    }
+
+    it('truncates it when the user talks over it', async () => {
+      const { fake, session, ofType } = await heardLater();
+      const epoch = session.epoch;
+      fake.emit({ type: 'input.speech.start', atMs: 0 });
+      session.playback('a1', 3500);
+      expect(fake.commandsOf('truncate')).toEqual([{ type: 'truncate', itemId: 'a1', audioEndMs: 3500 }]);
+      expect(session.transcript.find((t) => t.itemId === 'a1')).toEqual({ role: 'agent', itemId: 'a1', text: '01', truncated: true });
+      expect(ofType('transcript').filter((t) => t.final).map((t) => t.text)).toEqual(['0123456789', '01']);
+      // Nothing was in flight: no epoch is closed and only the new turn moves it.
+      expect(ofType('interrupted')).toHaveLength(0);
+      expect(session.epoch).toBe(epoch + 1);
+      expect(session.state).toBe('listening');
+    });
+
+    it('rewrites the local transcript when the model cannot truncate', async () => {
+      const { fake, session } = await heardLater({ capabilities: { truncate: false } });
+      fake.emit({ type: 'input.speech.start', atMs: 0 });
+      session.playback('a1', 10000);
+      expect(fake.commandsOf('truncate')).toHaveLength(0);
+      expect(session.transcript.find((t) => t.itemId === 'a1')).toMatchObject({ text: '01234', truncated: true });
+    });
+
+    for (const via of ['interrupt', 'sendText'] as const) {
+      it(`truncates it after ${via}`, async () => {
+        const { fake, session, ofType } = await heardLater();
+        if (via === 'interrupt') session.interrupt('user');
+        else session.sendText('wait');
+        session.playback('a1', 3500);
+        expect(fake.commandsOf('truncate')).toEqual([{ type: 'truncate', itemId: 'a1', audioEndMs: 3500 }]);
+        expect(ofType('interrupted')).toHaveLength(0);
+      });
+    }
+
+    it('applies a report that arrived before the user took the floor', async () => {
+      const { fake, session } = await heardLater();
+      session.playback('a1', 3500);
+      expect(fake.commandsOf('truncate')).toHaveLength(0);
+      fake.emit({ type: 'input.speech.start', atMs: 0 });
+      expect(fake.commandsOf('truncate')).toEqual([{ type: 'truncate', itemId: 'a1', audioEndMs: 3500 }]);
+    });
+
+    it('leaves audio that was heard in full alone, and forgets it', async () => {
+      const { fake, session } = await heardLater();
+      fake.emit({ type: 'input.speech.start', atMs: 0 });
+      session.playback('a1', 20000);
+      session.playback('a1', 3500);
+      expect(fake.commandsOf('truncate')).toHaveLength(0);
+      expect(session.transcript.find((t) => t.itemId === 'a1')).toEqual({ role: 'agent', itemId: 'a1', text: '0123456789' });
+    });
+
+    it('truncates audio of an earlier response of the interrupted turn', async () => {
+      const { fake, session } = await setup({ tools: { t: tool({ description: '', parameters: {}, run: () => 1 }) as Tool<never, unknown> } });
+      userTurn(fake);
+      speak(fake, 'r1', 'a1', 2000, 'Let me check');
+      call(fake, 'r1', 'c1', 't');
+      fake.emit({ type: 'response.end', responseId: 'r1', status: 'done' });
+      await flush();
+      fake.emit({ type: 'response.start', responseId: 'r2' });
+      speak(fake, 'r2', 'a2', 5000, 'It is sunny');
+      fake.emit({ type: 'input.speech.start', atMs: 0 });
+      session.playback('a1', 1500);
+      expect(fake.commandsOf('truncate')).toEqual([{ type: 'truncate', itemId: 'a1', audioEndMs: 1500 }]);
+    });
+  });
 });
 
 describe('client tools', () => {

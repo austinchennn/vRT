@@ -70,6 +70,7 @@ export interface StartSessionOptions {
 
 const DEFAULT_CLIENT_TOOL_TIMEOUT_MS = 30_000;
 const FINISHED_RESPONSES_KEPT = 64;
+const TRAILING_AUDIO_KEPT = 16;
 
 interface CallRecord {
   callId: string;
@@ -96,6 +97,8 @@ interface ResponseRecord {
 interface AudioItem {
   responseId: string;
   receivedMs: number;
+  /** Trailing audio only: the user took the floor after its response ended. */
+  cut?: boolean;
 }
 
 export function toModelOutput(result: ToolResult): unknown {
@@ -113,7 +116,8 @@ export function toModelOutput(result: ToolResult): unknown {
  *    and anything a cancelled call returns later is ignored.
  * 3. On interruption the model transcript is truncated to the milliseconds the
  *    edge reported as played (`playback()`), or rewritten locally when the model
- *    cannot truncate.
+ *    cannot truncate. This also covers audio the user talks over after its
+ *    response already ended, as models generate far faster than real time.
  * 4. The runtime never applies part of a call: a call either runs to completion
  *    under its own control or does not run.
  */
@@ -153,6 +157,11 @@ export class AgentSession {
   readonly #streams: ToolStreams;
 
   readonly #audioItems = new Map<string, AudioItem>();
+  /**
+   * Audio of turns that ended while the edge may still be playing it: a response
+   * often ends long before the user has heard it all. Oldest first, as played.
+   */
+  readonly #trailingAudio = new Map<string, AudioItem>();
   readonly #played = new Map<string, number>();
   readonly #interruptedItems = new Set<string>();
   readonly #transcript: TranscriptItem[] = [];
@@ -221,7 +230,7 @@ export class AgentSession {
   /** Manual turn end (or the edge's own VAD): commits buffered audio and asks for a reply. */
   commitAudio(): void {
     if (this.#closed) return;
-    if (this.#isResponding()) this.interrupt('user');
+    this.interrupt('user');
     this.#speechEndAt = this.#clock.now();
     this.#ensureTurn('thinking');
     this.#model.commitAudio();
@@ -230,7 +239,7 @@ export class AgentSession {
 
   sendText(text: string): void {
     if (this.#closed) return;
-    if (this.#isResponding()) this.interrupt('user');
+    this.interrupt('user');
     this.#speechEndAt = this.#clock.now();
     this.#ensureTurn('thinking');
     this.#appendTranscript('user', `text-${this.#turnCount}`, text);
@@ -243,19 +252,26 @@ export class AgentSession {
     if (this.#closed) return;
     this.#played.set(itemId, playedMs);
     if (this.#interruptedItems.has(itemId)) this.#truncate(itemId);
+    else this.#resolveTrailing(itemId, playedMs);
   }
 
   /**
    * Interrupts the agent: closes the epoch, cancels the response, truncates to
    * what was heard and resolves every pending call of the closed epoch.
-   * No-op when nothing is in flight.
+   * With nothing in flight there is no epoch to close and no `interrupted` event,
+   * but audio of an ended response that the edge may still be playing is still
+   * truncated to what `playback()` reports as heard.
    */
   interrupt(reason: InterruptReason = 'user'): void {
     this.#interrupt(reason, reason === 'speech' && this.capabilities.turnDetection.server);
   }
 
   #interrupt(reason: InterruptReason, providerCancels: boolean): void {
-    if (this.#closed || !this.#isResponding()) return;
+    if (this.#closed) return;
+    if (!this.#isResponding()) {
+      this.#cutTrailingAudio();
+      return;
+    }
     const startedAt = this.#clock.now();
     const closedEpoch = this.#epoch;
     this.#epoch++;
@@ -290,6 +306,8 @@ export class AgentSession {
     this.#emitter.emit({ type: 'interrupted', epoch: closedEpoch, reason });
     this.#metrics.interruptLatencyMs = this.#clock.now() - startedAt;
     this.#endTurn(true);
+    // Audio of the turn's earlier, already ended responses may still be playing too.
+    this.#cutTrailingAudio();
   }
 
   /** Delivers the app's result for a client tool call. Late or duplicate results are ignored. */
@@ -693,7 +711,37 @@ export class AgentSession {
       if (item) this.#emitter.emit({ type: 'transcript', role: 'agent', itemId, text: item.text, final: true });
     }
     this.#turnAgentItems.clear();
-    for (const itemId of this.#audioItems.keys()) if (!this.#interruptedItems.has(itemId)) this.#audioItems.delete(itemId);
+    for (const [itemId, audio] of this.#audioItems) {
+      if (this.#interruptedItems.has(itemId)) continue;
+      this.#audioItems.delete(itemId);
+      this.#trailingAudio.set(itemId, audio);
+    }
+    while (this.#trailingAudio.size > TRAILING_AUDIO_KEPT) this.#trailingAudio.delete(this.#trailingAudio.keys().next().value!);
+  }
+
+  /** The user took the floor: trailing audio was heard only as far as the edge reports. */
+  #cutTrailingAudio(): void {
+    for (const [itemId, audio] of this.#trailingAudio) {
+      audio.cut = true;
+      const played = this.#played.get(itemId);
+      if (played !== undefined) this.#resolveTrailing(itemId, played);
+    }
+  }
+
+  /**
+   * A report on trailing audio: heard in full, it is done with. Cut short after the
+   * user took the floor, it becomes an interrupted item and is truncated like one.
+   */
+  #resolveTrailing(itemId: string, playedMs: number): void {
+    const audio = this.#trailingAudio.get(itemId);
+    if (!audio) return;
+    const heardAll = Math.round(playedMs) >= Math.round(audio.receivedMs);
+    if (!heardAll && !audio.cut) return;
+    this.#trailingAudio.delete(itemId);
+    if (heardAll) return;
+    this.#audioItems.set(itemId, audio);
+    this.#interruptedItems.add(itemId);
+    this.#truncate(itemId);
   }
 
   #truncate(itemId: string): void {
