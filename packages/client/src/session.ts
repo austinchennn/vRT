@@ -475,7 +475,7 @@ export class ClientSession {
     if (!this.#speaker) return;
     const played = await this.#speaker.flush();
     for (const [itemId, playedMs] of Object.entries(played)) {
-      if (playedMs > 0) this.#send({ type: 'playback', itemId, playedMs: Math.round(playedMs) });
+      this.#send({ type: 'playback', itemId, playedMs: Math.round(playedMs) });
     }
   }
 

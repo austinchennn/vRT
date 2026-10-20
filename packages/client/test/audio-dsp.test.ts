@@ -37,6 +37,15 @@ describe('PlaybackRing', () => {
     expect(ring.size).toBe(0);
   });
 
+  it('flush reports items queued behind the one playing as 0, and nothing for items never queued', () => {
+    const ring = new PlaybackRing(16);
+    ring.push(new Float32Array(4).fill(1), 'a');
+    ring.push(new Float32Array(4).fill(2), 'b');
+    ring.pull(new Float32Array(2));
+    expect(ring.flush()).toEqual({ a: 2, b: 0 });
+    expect(ring.flush()).toEqual({});
+  });
+
   it('works when rebuilt from its own source (as inside the worklet)', () => {
     const Rebuilt = new Function(`return (${PlaybackRing.toString()})`)() as typeof PlaybackRing;
     const ring = new Rebuilt(4);
