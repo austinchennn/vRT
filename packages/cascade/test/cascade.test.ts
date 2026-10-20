@@ -110,7 +110,7 @@ describe('cascade', () => {
     const audio = (recognizer.transcribe as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Uint8Array;
     // Pre-roll keeps audio from before the VAD fired: more than the 10 voiced chunks.
     expect(audio.byteLength).toBeGreaterThan(10 * 640);
-    expect(events).toContainEqual({ type: 'transcript', role: 'user', itemId: 'cascade-user-1', text: 'what time is it', final: true });
+    expect(events).toContainEqual({ type: 'transcript', role: 'user', itemId: 'cascade-user-1', text: 'what time is it', final: true, revision: 1 });
     expect(requests[0]!.messages).toEqual([{ role: 'user', content: 'what time is it' }]);
   });
 
@@ -123,6 +123,19 @@ describe('cascade', () => {
     session.commitAudio();
     await vi.waitFor(() => expect(recognizer.transcribe).toHaveBeenCalled());
     expect((recognizer.transcribe as ReturnType<typeof vi.fn>).mock.calls[0]![2]).toMatchObject({ language: 'en', vocabulary: ['vdoc', 'Q3 plan'] });
+  });
+
+  it('keeps at most maxUtteranceMs of an utterance for a batch stt', async () => {
+    const recognizer = stt('long');
+    const { llm } = scriptedLlm([]);
+    const session = await cascade({ llm, stt: recognizer, maxUtteranceMs: 100 }).connect({});
+    const errors: unknown[] = [];
+    session.on('error', (e) => errors.push(e.error));
+    for (let i = 0; i < 8; i++) session.sendAudio(tone(9000));
+    session.commitAudio();
+    await vi.waitFor(() => expect(recognizer.transcribe).toHaveBeenCalled());
+    expect(((recognizer.transcribe as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Uint8Array).byteLength).toBe(5 * 640);
+    expect(errors).toMatchObject([{ code: 'transcription' }]);
   });
 
   it('round-trips a tool call: the result feeds the next request', async () => {

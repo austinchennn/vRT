@@ -5,7 +5,11 @@ export type RealtimeEvent =
   | { type: 'session.ready'; sessionId: string }
   | { type: 'input.speech.start'; atMs: number }
   | { type: 'input.speech.end'; atMs: number }
-  | { type: 'input.transcript'; itemId: string; text: string; final: boolean }
+  /**
+   * The user's words so far, replacing earlier text of `itemId`. A model that numbers
+   * its guesses sets `revision`, starting at 1 and growing by one per event of the item.
+   */
+  | { type: 'input.transcript'; itemId: string; text: string; final: boolean; revision?: number }
   | { type: 'response.start'; responseId: string }
   | { type: 'output.text'; responseId: string; delta: string }
   | { type: 'output.transcript'; responseId: string; itemId: string; delta: string }

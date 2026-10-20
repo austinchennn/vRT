@@ -21,17 +21,10 @@ import {
   type VadFactory,
 } from '@vrealtime/core';
 import { SentenceBuffer } from './sentences.js';
+import { StreamingTranscription, type Pcm16Format, type SttModel, type SttOptions, type StreamingLimits, type StreamingSttModel } from './stt.js';
 
 export { SentenceBuffer } from './sentences.js';
-
-type Pcm16Format = Extract<AudioFormat, { encoding: 'pcm16' }>;
-
-/** Speech to text for one utterance. */
-export interface SttModel {
-  /** Preferred input rate; audio is resampled to it. Default 16 kHz. */
-  readonly sampleRate?: Pcm16Rate;
-  transcribe(audio: Uint8Array, format: Pcm16Format, options: { signal: AbortSignal; language?: string; vocabulary?: readonly string[] }): Promise<string>;
-}
+export type { Pcm16Format, SttModel, SttOptions, SttResult, SttStream, StreamingLimits, StreamingSttModel, TranscriptionUpdate } from './stt.js';
 
 export type ChatMessage =
   | { role: 'user'; content: string }
@@ -65,8 +58,12 @@ export interface TtsModel {
 }
 
 export interface CascadeOptions {
-  /** Needed for audio input. */
-  stt?: SttModel;
+  /**
+   * Needed for audio input. A batch `SttModel` transcribes each utterance once it ends;
+   * a `StreamingSttModel` (`mode: 'stream'`) also reports revised guesses while it is
+   * spoken. Either way only the final transcript joins the conversation and can start a reply.
+   */
+  stt?: SttModel | StreamingSttModel;
   llm: TextModel;
   /** Without it the agent answers in text only. */
   tts?: TtsModel;
@@ -74,6 +71,10 @@ export interface CascadeOptions {
   vad?: VadFactory;
   /** Audio kept from before speech is detected, so the first syllable is not lost. Default 300 ms. */
   prerollMs?: number;
+  /** Longest utterance kept; audio past it is dropped until the utterance ends. Default 120 s. */
+  maxUtteranceMs?: number;
+  /** Bounds for a streaming stt. */
+  streaming?: StreamingLimits;
 }
 
 interface Segment {
@@ -92,6 +93,9 @@ interface ActiveResponse {
 }
 
 const KEPT_ITEMS = 16;
+const MAX_UTTERANCE_MS = 120_000;
+
+const isStreaming = (stt: SttModel | StreamingSttModel): stt is StreamingSttModel => (stt as StreamingSttModel).mode === 'stream';
 
 function concat(chunks: readonly Uint8Array[]): Uint8Array {
   const out = new Uint8Array(chunks.reduce((n, c) => n + c.byteLength, 0));
@@ -133,6 +137,12 @@ export class CascadeSession implements RealtimeSession {
   readonly #inputFormat: Pcm16Format;
   #resampler: Pcm16Resampler | undefined;
   #utterance: Uint8Array[] = [];
+  #utteranceMs = 0;
+  /** Inside an utterance: since speech started, or since the first audio without a vad. */
+  #inUtterance = false;
+  /** The utterance ran past `maxUtteranceMs`; the rest of it is dropped. */
+  #overflow = false;
+  readonly #streaming: StreamingTranscription | undefined;
   #preroll: Uint8Array[] = [];
   #prerollMs = 0;
   #inputMs = 0;
@@ -152,6 +162,15 @@ export class CascadeSession implements RealtimeSession {
     this.capabilities = cascadeCapabilities(options);
     this.#inputFormat = { encoding: 'pcm16', sampleRate: options.stt?.sampleRate ?? 16000, channels: 1 };
     this.#vad = options.vad && options.stt && config.turnDetection !== null ? options.vad() : undefined;
+    if (options.stt && isStreaming(options.stt)) {
+      this.#streaming = new StreamingTranscription(
+        options.stt,
+        this.#inputFormat,
+        options.streaming ?? {},
+        (update) => this.#emit({ type: 'input.transcript', itemId: update.itemId, text: update.text, final: update.final, revision: update.revision }),
+        (error) => this.#emit({ type: 'error', error, recoverable: true }),
+      );
+    }
   }
 
   on<T extends EventType>(type: T, listener: (event: EventOf<T>) => void): () => void {
@@ -186,17 +205,18 @@ export class CascadeSession implements RealtimeSession {
     this.#inputMs += ms;
     const vad = this.#vad;
     if (!vad) {
-      this.#utterance.push(data);
+      if (!this.#inUtterance) this.#begin([]);
+      this.#capture(data, ms);
       return;
     }
     const event = vad.process({ data, format: this.#inputFormat, durationMs: ms });
     if (event === 'start') {
-      this.#utterance = this.#preroll;
+      this.#begin(this.#preroll);
       this.#preroll = [];
       this.#prerollMs = 0;
     }
     if (vad.speaking || event === 'end') {
-      this.#utterance.push(data);
+      this.#capture(data, ms);
     } else {
       this.#preroll.push(data);
       this.#prerollMs += ms;
@@ -222,7 +242,8 @@ export class CascadeSession implements RealtimeSession {
   }
 
   clearAudio(): void {
-    this.#utterance = [];
+    this.#streaming?.discard();
+    this.#reset();
     this.#preroll = [];
     this.#prerollMs = 0;
   }
@@ -276,6 +297,7 @@ export class CascadeSession implements RealtimeSession {
     this.#closed = true;
     this.#response?.controller.abort();
     this.#response = undefined;
+    this.#streaming?.close();
     this.#lifetime.abort();
   }
 
@@ -290,24 +312,64 @@ export class CascadeSession implements RealtimeSession {
     });
   }
 
+  #sttOptions(): Omit<SttOptions, 'signal'> {
+    const transcription = typeof this.#config.inputTranscription === 'object' ? this.#config.inputTranscription : {};
+    return {
+      ...(transcription.language ? { language: transcription.language } : {}),
+      ...(transcription.vocabulary?.length ? { vocabulary: transcription.vocabulary } : {}),
+    };
+  }
+
+  /** Starts an utterance with the audio heard just before it. */
+  #begin(preroll: readonly Uint8Array[]): void {
+    this.#reset();
+    this.#inUtterance = true;
+    this.#streaming?.open(`cascade-user-${++this.#userCount}`, this.#sttOptions(), this.#lifetime.signal);
+    for (const chunk of preroll) this.#capture(chunk, pcm16DurationMs(chunk.byteLength, this.#inputFormat.sampleRate));
+  }
+
+  #capture(data: Uint8Array, ms: number): void {
+    if (this.#utteranceMs + ms > (this.#options.maxUtteranceMs ?? MAX_UTTERANCE_MS)) {
+      if (!this.#overflow) this.#emit({ type: 'error', error: new RealtimeError('transcription', 'cascade: utterance too long, the rest of it is dropped', { provider: 'cascade' }), recoverable: true });
+      this.#overflow = true;
+      return;
+    }
+    this.#utteranceMs += ms;
+    if (this.#streaming) this.#streaming.write(data);
+    else this.#utterance.push(data);
+  }
+
+  #reset(): void {
+    this.#utterance = [];
+    this.#utteranceMs = 0;
+    this.#inUtterance = false;
+    this.#overflow = false;
+  }
+
   #transcribe(autoRespond: boolean): void {
     const audio = concat(this.#utterance);
-    this.#utterance = [];
-    const stt = this.#options.stt;
+    this.#reset();
+    if (this.#streaming) {
+      // Its updates were reported as they came; the final one joins the conversation in order.
+      const final = this.#streaming.end();
+      if (final) this.#after(async () => this.#heard(await final, autoRespond));
+      return;
+    }
+    const stt = this.#options.stt as SttModel | undefined;
     if (!stt || audio.byteLength === 0) return;
     const itemId = `cascade-user-${++this.#userCount}`;
     this.#after(async () => {
-      const transcription = typeof this.#config.inputTranscription === 'object' ? this.#config.inputTranscription : {};
-      const text = (await stt.transcribe(audio, this.#inputFormat, {
-        signal: this.#lifetime.signal,
-        ...(transcription.language ? { language: transcription.language } : {}),
-        ...(transcription.vocabulary?.length ? { vocabulary: transcription.vocabulary } : {}),
-      })).trim();
+      const text = (await stt.transcribe(audio, this.#inputFormat, { signal: this.#lifetime.signal, ...this.#sttOptions() })).trim();
       if (this.#closed || !text) return;
-      this.#emit({ type: 'input.transcript', itemId, text, final: true });
-      this.history.push({ role: 'user', content: text });
-      if (autoRespond && !this.#vad?.speaking) this.#start();
+      this.#emit({ type: 'input.transcript', itemId, text, final: true, revision: 1 });
+      this.#heard(text, autoRespond);
     });
+  }
+
+  #heard(text: string | undefined, autoRespond: boolean): void {
+    if (this.#closed || !text) return;
+    this.history.push({ role: 'user', content: text });
+    if (autoRespond && !this.#vad?.speaking) this.#start();
   }
 
   #toolName(callId: string): string {
