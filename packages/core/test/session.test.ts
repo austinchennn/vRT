@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fakeModel, type CapabilityOverrides, type FakeSession } from '@vrealtime/testing';
 import { defineAgent, startSession, tool, type AgentEvent, type AgentSession, type Hooks, type Tool, type ToolResult } from '../src/index.js';
+import { PLAYBACK_ITEMS_KEPT } from '../src/playback.js';
 
 const pcm = { encoding: 'pcm16', sampleRate: 24000, channels: 1 } as const;
 const audio = (ms: number) => ({ data: new Uint8Array(48 * ms), format: pcm });
@@ -399,6 +400,18 @@ describe('truncation', () => {
       { type: 'truncate', itemId: 'a1', audioEndMs: 300 },
       { type: 'truncate', itemId: 'a1', audioEndMs: 450 },
     ]);
+  });
+
+  it('forgets the oldest interrupted items, so a long session keeps bounded memory', async () => {
+    const { fake, session } = await setup();
+    for (let i = 0; i <= PLAYBACK_ITEMS_KEPT; i++) {
+      userTurn(fake, `r${i}`);
+      speak(fake, `r${i}`, `a${i}`, 100);
+      session.interrupt();
+    }
+    session.playback('a0', 50);
+    session.playback(`a${PLAYBACK_ITEMS_KEPT}`, 50);
+    expect(fake.commandsOf('truncate')).toEqual([{ type: 'truncate', itemId: `a${PLAYBACK_ITEMS_KEPT}`, audioEndMs: 50 }]);
   });
 
   it('never truncates past the audio received', async () => {

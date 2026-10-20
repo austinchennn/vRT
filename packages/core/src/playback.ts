@@ -1,3 +1,5 @@
+import { BoundedMap } from './bounded.js';
+
 /** Truncate `itemId` to `audioEndMs`: the share of its `receivedMs` the user actually heard. */
 export interface Truncation {
   itemId: string;
@@ -22,8 +24,12 @@ interface Entry {
   fullText: string | undefined;
 }
 
-/** Trailing audio kept per session; older trailing items are forgotten. */
-const TRAILING_KEPT = 16;
+/**
+ * Audio items remembered per session, oldest forgotten first, whatever their phase.
+ * A response has one or two audio items, and reports arrive within moments of a
+ * cut, so this covers many turns of late reports while memory stays bounded.
+ */
+export const PLAYBACK_ITEMS_KEPT = 32;
 
 /**
  * Reconciles the audio sent to the edge with what the edge reports as heard
@@ -32,7 +38,8 @@ const TRAILING_KEPT = 16;
  * the model and the transcript, so it is testable without either.
  */
 export class PlaybackLedger {
-  readonly #items = new Map<string, Entry>();
+  /** One record per item, so forgetting an item forgets its report, phase and text at once. */
+  readonly #items = new BoundedMap<string, Entry>(PLAYBACK_ITEMS_KEPT);
 
   /** Hot path: `ms` more audio of `itemId` went to the edge. */
   received(itemId: string, responseId: string, ms: number): void {
@@ -62,17 +69,7 @@ export class PlaybackLedger {
 
   /** The turn ended: its live audio may still be playing. */
   endTurn(): void {
-    let trailing = 0;
-    for (const entry of this.#items.values()) {
-      if (entry.phase === 'live') entry.phase = 'trailing';
-      if (entry.phase === 'trailing' || entry.phase === 'cut') trailing++;
-    }
-    for (const [itemId, entry] of this.#items) {
-      if (trailing <= TRAILING_KEPT) break;
-      if (entry.phase !== 'trailing' && entry.phase !== 'cut') continue;
-      this.#items.delete(itemId);
-      trailing--;
-    }
+    for (const entry of this.#items.values()) if (entry.phase === 'live') entry.phase = 'trailing';
   }
 
   /** The user took the floor: trailing audio was heard only as far as the edge reports. */

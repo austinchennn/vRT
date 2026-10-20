@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PlaybackLedger } from '../src/playback.js';
+import { PLAYBACK_ITEMS_KEPT, PlaybackLedger } from '../src/playback.js';
 
 const cut = (itemId: string, audioEndMs: number, receivedMs: number) => [{ itemId, audioEndMs, receivedMs }];
 
@@ -53,6 +53,19 @@ describe('PlaybackLedger', () => {
     expect(ledger.report('a1', 1000)).toEqual([]);
     expect(ledger.userTookFloor()).toEqual([]);
     expect(ledger.report('a1', 10)).toEqual([]);
+  });
+
+  it('keeps a bounded number of items, forgetting the oldest with everything it knew', () => {
+    const ledger = new PlaybackLedger();
+    for (let i = 0; i <= PLAYBACK_ITEMS_KEPT; i++) {
+      ledger.received(`a${i}`, `r${i}`, 1000);
+      ledger.interrupt((responseId) => responseId === `r${i}`);
+    }
+    // A late report for the oldest interruption no longer truncates; the newest still does.
+    expect(ledger.report('a0', 500)).toEqual([]);
+    expect(ledger.isInterrupted('a0')).toBe(false);
+    expect(ledger.report(`a${PLAYBACK_ITEMS_KEPT}`, 500)).toEqual(cut(`a${PLAYBACK_ITEMS_KEPT}`, 500, 1000));
+    expect(ledger.report('a1', 500)).toEqual(cut('a1', 500, 1000));
   });
 
   it('ignores reports for audio it never received', () => {
