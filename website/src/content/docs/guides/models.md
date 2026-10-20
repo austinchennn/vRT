@@ -64,3 +64,42 @@ serve(agent, {
   }),
 });
 ```
+
+## Errors
+
+Every adapter reports failures as a `RealtimeError` with a provider-neutral `code`, so one handler works for every model. The provider's own code stays in `providerCode`, and its raw payload in `cause`.
+
+```js
+import { isRealtimeError } from '@vrealtime/core';
+
+defineAgent({
+  // ...
+  hooks: {
+    onError: (error, recoverable) => {
+      if (!isRealtimeError(error)) return logger.error(error);
+      if (error.code === 'quota') return alertBilling(error.provider, error.message);
+      if (error.retryable && !recoverable) return reconnectLater();
+      logger.warn({ code: error.code, provider: error.provider, providerCode: error.providerCode });
+    },
+  },
+});
+```
+
+| `code` | Meaning | `retryable` |
+|---|---|---|
+| `auth` | Credentials missing, invalid or expired | no |
+| `quota` | Billing refused: credits exhausted, spending cap, contract ended | no |
+| `rate_limited` | Too many requests | yes |
+| `overloaded` | The provider is at capacity, for example concurrent sessions | yes |
+| `invalid_request` | The provider rejected a request or the session config | no |
+| `session_limit` | An idle timeout or maximum duration ended the session | yes |
+| `connection` | The connection dropped unexpectedly | yes |
+| `transcription` | Transcribing the user's speech failed; the conversation goes on | no |
+| `unsupported` | Input the model cannot take, such as an audio format it cannot convert | no |
+| `provider` | Anything else the provider reported | yes |
+
+`recoverable` says whether the session goes on; `retryable` says whether trying again unchanged, such as reconnecting, can succeed. Boson's close codes map to `overloaded` (1013), `auth` (3000) and `quota` (4429). Gemini's close codes are not mapped yet and report `connection`.
+
+## Usage
+
+`response.end` carries `usage` with `inputTokens`, `outputTokens` and, where the provider reports it, `cachedInputTokens`: the part of the input read from the prompt cache. The runtime adds up every response of a turn into `metrics.usage` for `onTurnEnd`.
