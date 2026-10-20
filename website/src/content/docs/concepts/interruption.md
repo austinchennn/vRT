@@ -17,7 +17,7 @@ Every turn has an **epoch**, a number that only grows: it advances when a turn s
 
 1. **No side effects after an interruption.** A tool call of a closed epoch that has not started never starts. Server tools are cancelled through their `AbortSignal`; app tools are stopped by the client's epoch gate.
 2. **Exactly one result per call.** A cancelled call is still answered, with `INTERRUPTED`, so the model never waits on a call that will not finish.
-3. **The transcript matches what was heard.** The client reports how many milliseconds of each audio item were actually played, and the conversation is truncated there.
+3. **The transcript matches what was heard.** The client reports how many milliseconds of each audio item were actually played, 0 for an item it never started, and the conversation is truncated there. Audio the server could not deliver counts as unheard. Because models generate far faster than real time, a reply has often ended before the user talks over it; its audio is still truncated to what was played.
 4. **Each tool call is atomic.** A call takes full effect or none. This one is the tool's job: check the cancellation signal right before committing (see [Tools](/concepts/tools/)).
 
 ## What happens when the user interrupts
