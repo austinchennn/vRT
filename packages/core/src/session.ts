@@ -72,6 +72,7 @@ export interface StartSessionOptions {
 const DEFAULT_CLIENT_TOOL_TIMEOUT_MS = 30_000;
 const FINISHED_RESPONSES_KEPT = 64;
 const TRAILING_AUDIO_KEPT = 16;
+const INTERRUPTED_ITEMS_KEPT = 16;
 
 interface CallRecord {
   callId: string;
@@ -162,9 +163,15 @@ export class AgentSession {
    * Audio of turns that ended while the edge may still be playing it: a response
    * often ends long before the user has heard it all. Oldest first, as played.
    */
-  readonly #trailingAudio = new BoundedMap<string, AudioItem>(TRAILING_AUDIO_KEPT);
+  readonly #trailingAudio = new BoundedMap<string, AudioItem>(TRAILING_AUDIO_KEPT, (itemId) => this.#played.delete(itemId));
+  /** Playback reports, kept only for audio that may still be truncated. */
   readonly #played = new Map<string, number>();
-  readonly #interruptedItems = new Set<string>();
+  /** Items cut short, oldest first; late reports on them truncate again. Forgotten whole past the limit. */
+  readonly #interruptedItems = new BoundedSet<string>(INTERRUPTED_ITEMS_KEPT, (itemId) => {
+    this.#audioItems.delete(itemId);
+    this.#played.delete(itemId);
+    this.#untruncated.delete(itemId);
+  });
   readonly #transcript: TranscriptItem[] = [];
   readonly #transcriptIndex = new Map<string, TranscriptItem>();
   /** Full agent text of interrupted items, so repeated truncation always cuts from the original. */
@@ -251,6 +258,8 @@ export class AgentSession {
   /** Edge report of how much of an audio item the user actually heard. */
   playback(itemId: string, playedMs: number): void {
     if (this.#closed) return;
+    // Audio that can no longer be truncated has no use for its reports.
+    if (!this.#audioItems.has(itemId) && !this.#trailingAudio.has(itemId)) return;
     this.#played.set(itemId, playedMs);
     if (this.#interruptedItems.has(itemId)) this.#truncate(itemId);
     else this.#resolveTrailing(itemId, playedMs);
@@ -739,7 +748,10 @@ export class AgentSession {
     const heardAll = Math.round(playedMs) >= Math.round(audio.receivedMs);
     if (!heardAll && !audio.cut) return;
     this.#trailingAudio.delete(itemId);
-    if (heardAll) return;
+    if (heardAll) {
+      this.#played.delete(itemId);
+      return;
+    }
     this.#audioItems.set(itemId, audio);
     this.#interruptedItems.add(itemId);
     this.#truncate(itemId);

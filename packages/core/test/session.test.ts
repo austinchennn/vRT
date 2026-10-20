@@ -401,6 +401,26 @@ describe('truncation', () => {
     ]);
   });
 
+  it('forgets the oldest interrupted items, so only recent late reports truncate', async () => {
+    const { fake, session } = await setup();
+    // One more than the session keeps.
+    for (let i = 1; i <= 17; i++) {
+      userTurn(fake, `r${i}`);
+      speak(fake, `r${i}`, `a${i}`, 1000, 'Hello there world');
+      session.playback(`a${i}`, 100);
+      session.interrupt();
+    }
+    const before = fake.commandsOf('truncate').length;
+    session.playback('a1', 450);
+    expect(fake.commandsOf('truncate')).toHaveLength(before);
+    session.playback('a2', 450);
+    session.playback('a17', 450);
+    expect(fake.commandsOf('truncate').slice(before)).toEqual([
+      { type: 'truncate', itemId: 'a2', audioEndMs: 450 },
+      { type: 'truncate', itemId: 'a17', audioEndMs: 450 },
+    ]);
+  });
+
   it('never truncates past the audio received', async () => {
     const { fake, session } = await setup();
     userTurn(fake);

@@ -35,4 +35,13 @@ describe('BoundedSet', () => {
     expect([...set]).toEqual(['b', 'c']);
     expect(set).toBeInstanceOf(Set);
   });
+
+  it('reports each value it forgets, but not delete or clear', () => {
+    const evicted: string[] = [];
+    const set = new BoundedSet<string>(2, (value) => evicted.push(value));
+    set.add('a').add('b').add('c');
+    set.delete('b');
+    set.clear();
+    expect(evicted).toEqual(['a']);
+  });
 });

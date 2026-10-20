@@ -27,15 +27,22 @@ export class BoundedMap<K, V> extends Map<K, V> {
 
 export class BoundedSet<T> extends Set<T> {
   readonly limit: number;
+  readonly #onEvict: ((value: T) => void) | undefined;
 
-  constructor(limit: number) {
+  /** `onEvict` runs for every value dropped to stay within `limit`, not for `delete()` or `clear()`. */
+  constructor(limit: number, onEvict?: (value: T) => void) {
     super();
     this.limit = limit;
+    this.#onEvict = onEvict;
   }
 
   override add(value: T): this {
     super.add(value);
-    while (this.size > this.limit) super.delete(this.values().next().value as T);
+    while (this.size > this.limit) {
+      const oldest = this.values().next().value as T;
+      super.delete(oldest);
+      this.#onEvict?.(oldest);
+    }
     return this;
   }
 }
