@@ -189,6 +189,7 @@ processes. Run `npm run test:conformance`; select `server-tool-stream-v1` for se
 | `@vrealtime/client` | Browser SDK: app-side tools with the epoch gate, mic and playback |
 | `@vrealtime/testing` | Scripted fake model for tests |
 | `@vrealtime/cascade`, `@vrealtime/ai-sdk` | STT + any text LLM + TTS as one realtime model; AI SDK models as the LLM |
+| `@vrealtime/vosk` | Streaming STT for cascade through a self-hosted [Vosk](https://alphacephei.com/vosk/server) server (Boson TTS: `bosonTts()`) |
 | `@vrealtime/vad` | Energy VAD for turn detection where the model has none |
 | `@vrealtime/react` | `useRealtime()` hook |
 

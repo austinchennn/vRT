@@ -287,9 +287,9 @@ session.interrupt();
 
 ```ts
 const model = cascade({
-  stt: deepgram(),                       // 或 boson.stt()
-  llm: aiSdk(anthropic('claude-sonnet-5-5')), // 任意 Vercel AI SDK 模型
-  tts: boson.tts({ voice: 'default' }),  // Higgs TTS 3
+  stt: voskStt({ url: 'ws://localhost:2700' }), // 流式，自建 Vosk 服务；或批量的 openaiStt()
+  llm: aiSdk(anthropic('claude-sonnet-5-5')),   // 任意 Vercel AI SDK 模型
+  tts: bosonTts({ voice: 'default' }),          // Higgs TTS 3；或 openaiTts()
   vad: energyVad(),
 });
 ```
@@ -299,6 +299,8 @@ const model = cascade({
 ### 8.1 流式转写（可选）
 
 `stt` 默认是批量的 `SttModel.transcribe()`：一句话说完才转写一次。带 `mode: 'stream'` 的 `StreamingSttModel` 改为每句话 `open()` 一个 `SttStream`，边说边 `write()` 音频，说完 `end()`，`results` 依次给出整句的猜测。只靠 `mode` 区分，不看有没有某个方法，旧的 batch 实现一行不用改。
+
+参考实现是 `@vrealtime/vosk` 的 `voskStt()`，连接开源的 [Vosk](https://alphacephei.com/vosk/server) 服务（Kaldi，本地运行、不需要 key）。Vosk 在每个停顿处结束一段、下一段从空开始，适配器把已结束的段和当前猜测拼成整句再交给 cascade；供应商给的是增量还是分段，都由适配器换算成整句替换。`npm run test:live` 里有一条端到端测试：Vosk 听、本地 Ollama 回答、Boson TTS 说。
 
 | 规则 | 内容 |
 |---|---|
