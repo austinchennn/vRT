@@ -20,6 +20,7 @@
     "bench": "node scripts/bench.mjs",
     "bench:latency": "node scripts/bench-latency.mjs",
     "test:e2e": "vitest run examples/minimal",
+    "test:live": "vitest run --config live/vitest.config.ts",
     "pack": "node scripts/pack.mjs",
     "test:consumer": "node scripts/consumer-smoke.mjs",
     "publish:dry-run": "node scripts/publish.mjs --dry-run",
