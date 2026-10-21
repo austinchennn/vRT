@@ -15,5 +15,5 @@
     "allowJs": true,
     "noEmit": true
   },
-  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "examples/*/test/**/*.ts"]
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "examples/*/test/**/*.ts", "live/**/*.ts"]
 }
