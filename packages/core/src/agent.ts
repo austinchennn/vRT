@@ -1,4 +1,4 @@
-import type { Usage } from './events.js';
+import type { StopReason, Usage } from './events.js';
 import type { RealtimeModel } from './model.js';
 import type { Tool, ToolResult, ToolRisk } from './tool.js';
 import type { VadFactory } from './vad.js';
@@ -22,6 +22,8 @@ export interface TurnMetrics {
   /** Interrupt signal → playback stopped and gate closed. */
   interruptLatencyMs?: number;
   toolCalls: number;
+  stopReason?: StopReason | 'continuation_limit';
+  continuations?: number;
   /** What the provider reported for the responses that ended during the turn, cancelled ones included. */
   usage?: Usage;
 }
@@ -64,6 +66,8 @@ export interface AgentDefinition {
   turnDetection?: 'server' | 'semantic' | null;
   /** Client tool calls that get no result within this time resolve as TIMEOUT. */
   clientToolTimeoutMs?: number;
+  /** Subsequent generations per user turn, including tool feedback. Default 16. */
+  maxContinuations?: number;
   /**
    * Turn detection for models without server VAD: the runtime runs it on incoming
    * audio, interrupts on speech start and commits + asks for a reply on speech end.

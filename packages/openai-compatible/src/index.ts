@@ -24,6 +24,7 @@ import {
   type RespondOptions,
   type ResponseStatus,
   type SessionConfig,
+  type StopReason,
   type Usage,
 } from '@vrealtime/core';
 
@@ -171,6 +172,20 @@ function responseStatus(response: { status?: string; status_details?: { reason?:
     default:
       return 'done';
   }
+}
+
+function stopReasonOf(response: Json | undefined): StopReason {
+  if (response?.['status'] === 'cancelled') return 'cancelled';
+  if (response?.['status'] === 'failed') return 'failed';
+  const reason = response?.['status_details']?.reason;
+  if (reason === 'content_filter') return 'content_filter';
+  if (response?.['status'] === 'incomplete') {
+    return reason === 'max_output_tokens' || reason === 'max_tokens' ? 'max_tokens' : 'unknown';
+  }
+  if (response?.['status'] === 'completed') {
+    return response['output']?.some((item: Json) => item['type'] === 'function_call') ? 'tool_calls' : 'completed';
+  }
+  return 'unknown';
 }
 
 function sameFormat(a: AudioFormat, b: AudioFormat): boolean {
@@ -424,7 +439,8 @@ export class CompatibleSession implements RealtimeSession {
       case 'response.done': {
         const response = message['response'];
         const usage = usageOf(response?.usage);
-        this.#emit({ type: 'response.end', responseId: response?.id, status: responseStatus(response), ...(usage ? { usage } : {}) });
+        const rawStopReason = response?.status_details?.reason;
+        this.#emit({ type: 'response.end', responseId: response?.id, status: responseStatus(response), stopReason: stopReasonOf(response), ...(typeof rawStopReason === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(rawStopReason) ? { rawStopReason } : {}), ...(usage ? { usage } : {}) });
         return;
       }
       case 'error': {

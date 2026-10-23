@@ -12,6 +12,7 @@ interface Setup {
   capabilities?: CapabilityOverrides;
   clientTools?: string[];
   clientToolTimeoutMs?: number;
+  maxContinuations?: number;
 }
 
 async function setup(options: Setup = {}) {
@@ -19,6 +20,7 @@ async function setup(options: Setup = {}) {
   const agent = defineAgent({
     model,
     instructions: 'test',
+    ...(options.maxContinuations !== undefined ? { maxContinuations: options.maxContinuations } : {}),
     clientTools: 'accept',
     ...(options.tools ? { tools: options.tools } : {}),
     ...(options.hooks ? { hooks: options.hooks } : {}),
@@ -223,6 +225,8 @@ describe('hooks', () => {
     // Usage adds up over every response of the turn: here the tool call's and the reply's.
     expect(hooks.onTurnEnd).toHaveBeenCalledWith(expect.objectContaining({ interrupted: false }), {
       toolCalls: 1,
+      continuations: 1,
+      stopReason: 'completed',
       timeToFirstToolCallMs: 120,
       timeToFirstAudioMs: 320,
       usage: { inputTokens: 30, outputTokens: 8, cachedInputTokens: 2 },
@@ -606,3 +610,141 @@ describe('lifecycle', () => {
 });
 
 void (null as unknown as AgentSession);
+
+
+describe('stop reason continuation', () => {
+  it('continues max_tokens and pause within one turn, with no invented user messages', async () => {
+    const onTurnEnd = vi.fn();
+    const { session, fake } = await setup({ hooks: { onTurnEnd }, capabilities: { tools: { autoReplyAfterResult: true } } });
+    session.sendText('finish the task');
+    for (const [index, stopReason] of (['max_tokens', 'pause', 'completed'] as const).entries()) {
+      const responseId = `r${index}`;
+      fake.emit({ type: 'response.start', responseId });
+      fake.emit({ type: 'response.end', responseId, status: 'done', stopReason, usage: { outputTokens: 2 } });
+      fake.emit({ type: 'response.end', responseId, status: 'done', stopReason, usage: { outputTokens: 2 } });
+    }
+    expect(fake.commandsOf('respond')).toHaveLength(3);
+    expect(fake.commandsOf('sendText')).toHaveLength(1);
+    expect(onTurnEnd).toHaveBeenCalledTimes(1);
+    expect(onTurnEnd.mock.calls[0]![1]).toMatchObject({ continuations: 2, stopReason: 'completed', usage: { outputTokens: 6 } });
+  });
+
+  for (const stopReason of ['refusal', 'content_filter', 'unknown', 'failed', 'cancelled', 'tool_calls'] as const) {
+    it(`stops and reports ${stopReason} without tools`, async () => {
+      const { session, fake, ofType } = await setup();
+      session.sendText('go');
+      fake.emit({ type: 'response.start', responseId: 'r1' });
+      fake.emit({ type: 'response.end', responseId: 'r1', status: 'done', stopReason });
+      expect(session.state).toBe('idle');
+      expect(fake.commandsOf('respond')).toHaveLength(1);
+      expect(ofType('error')).toHaveLength(1);
+    });
+  }
+
+  for (const stopReason of ['completed', 'tool_calls', 'max_tokens', 'pause', 'refusal', 'content_filter', 'unknown', 'failed'] as const) {
+    it(`waits for all tools before deciding ${stopReason}, even if response.end repeats`, async () => {
+      const { session, fake } = await setup({ clientTools: ['read'], capabilities: { tools: { autoReplyAfterResult: false } } });
+      const calls: string[] = [];
+      session.on('tool.call', e => calls.push(e.callId));
+      session.sendText('go');
+      fake.emit({ type: 'response.start', responseId: 'r1' });
+      call(fake, 'r1', 'c1', 'read');
+      call(fake, 'r1', 'c2', 'read');
+      await flush();
+      fake.emit({ type: 'response.end', responseId: 'r1', status: 'done', stopReason });
+      fake.emit({ type: 'response.end', responseId: 'r1', status: 'done', stopReason });
+      expect(fake.commandsOf('respond')).toHaveLength(1);
+      session.submitClientToolResult(calls[0]!, { ok: true, output: 'one' });
+      await flush();
+      expect(fake.commandsOf('respond')).toHaveLength(1);
+      session.submitClientToolResult(calls[1]!, { ok: true, output: 'two' });
+      await flush();
+      const continues = ['completed', 'tool_calls', 'max_tokens', 'pause'].includes(stopReason);
+      expect(fake.commandsOf('respond')).toHaveLength(continues ? 2 : 1);
+      expect(fake.commandsOf('submitToolResult').every(c => c.options?.respond === false)).toBe(true);
+      await session.close();
+    });
+  }
+
+  it('enforces the budget including tool feedback, and resets it on the next user turn', async () => {
+    const onTurnEnd = vi.fn();
+    const { session, fake } = await setup({ maxContinuations: 1, hooks: { onTurnEnd }, tools: { t: tool({ description: '', parameters: {}, run: () => 'ok' }) as Tool<never, unknown> }, capabilities: { tools: { autoReplyAfterResult: false } } });
+    session.sendText('go');
+    fake.emit({ type: 'response.start', responseId: 'r1' });
+    call(fake, 'r1', 'c1', 't');
+    fake.emit({ type: 'response.end', responseId: 'r1', status: 'done', stopReason: 'tool_calls' });
+    await flush();
+    fake.emit({ type: 'response.start', responseId: 'r2' });
+    fake.emit({ type: 'response.end', responseId: 'r2', status: 'done', stopReason: 'pause' });
+    expect(onTurnEnd.mock.calls[0]![1]).toMatchObject({ continuations: 1, stopReason: 'continuation_limit' });
+    expect(fake.commandsOf('respond')).toHaveLength(2);
+    session.sendText('next');
+    fake.emit({ type: 'response.start', responseId: 'r3' });
+    fake.emit({ type: 'response.end', responseId: 'r3', status: 'done', stopReason: 'max_tokens' });
+    expect(fake.commandsOf('respond')).toHaveLength(4);
+    await session.close();
+  });
+
+  it('does not continue a late truncated response after interruption', async () => {
+    const { session, fake } = await setup();
+    session.sendText('go');
+    fake.emit({ type: 'response.start', responseId: 'old' });
+    session.interrupt();
+    session.sendText('next');
+    fake.emit({ type: 'response.end', responseId: 'old', status: 'done', stopReason: 'max_tokens' });
+    expect(fake.commandsOf('respond')).toHaveLength(2);
+    await session.close();
+  });
+
+  for (const maxContinuations of [-1, 0.5, Infinity, NaN]) {
+    it(`rejects invalid budget ${maxContinuations}`, async () => {
+      await expect(setup({ maxContinuations })).rejects.toThrow('maxContinuations');
+    });
+  }
+
+  it('allows zero continuations', async () => {
+    const { session, fake } = await setup({ maxContinuations: 0 });
+    session.sendText('go');
+    fake.emit({ type: 'response.start', responseId: 'r1' });
+    fake.emit({ type: 'response.end', responseId: 'r1', status: 'done', stopReason: 'max_tokens' });
+    expect(fake.commandsOf('respond')).toHaveLength(1);
+    expect(session.state).toBe('idle');
+  });
+});
+
+it('uses a default budget of 16 continuations', async () => {
+  const onTurnEnd = vi.fn();
+  const { session, fake } = await setup({ hooks: { onTurnEnd } });
+  session.sendText('go');
+  for (let i = 0; i <= 16; i++) {
+    fake.emit({ type: 'response.start', responseId: `limit-${i}` });
+    fake.emit({ type: 'response.end', responseId: `limit-${i}`, status: 'done', stopReason: 'max_tokens' });
+  }
+  expect(fake.commandsOf('respond')).toHaveLength(17);
+  expect(onTurnEnd).toHaveBeenCalledTimes(1);
+  expect(onTurnEnd.mock.calls[0]![1]).toMatchObject({ continuations: 16, stopReason: 'continuation_limit' });
+});
+
+it.each(['failed', 'cancelled', 'interrupted'] as const)('lets status %s override a retryable reason', async status => {
+  const { session, fake } = await setup();
+  session.sendText('go');
+  fake.emit({ type: 'response.start', responseId: 'r1' });
+  fake.emit({ type: 'response.end', responseId: 'r1', status, stopReason: 'max_tokens' });
+  expect(fake.commandsOf('respond')).toHaveLength(1);
+  expect(session.state).toBe('idle');
+});
+
+it('closes truncated tool fragments without executing them or admitting late calls', async () => {
+  const run = vi.fn(() => 'ok');
+  const { session, fake } = await setup({ tools: { t: tool({ description: '', parameters: {}, run }) as Tool<never, unknown> } });
+  const stream = vi.fn(); session.on('tool.stream', stream);
+  session.sendText('go');
+  fake.emit({ type: 'response.start', responseId: 'r1' });
+  fake.emit({ type: 'tool.call.delta', responseId: 'r1', callId: 'partial', name: 't', argumentsDelta: '{"text":' });
+  fake.emit({ type: 'response.end', responseId: 'r1', status: 'done', stopReason: 'max_tokens' });
+  await flush();
+  expect(run).not.toHaveBeenCalled();
+  expect(stream.mock.calls.at(-1)![0].phase).toBe('failed');
+  expect(fake.commandsOf('respond')).toHaveLength(2);
+  await session.close();
+});

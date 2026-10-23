@@ -325,3 +325,38 @@ describe('trimHistory', () => {
     expect(trimHistory([result('gone'), { role: 'assistant', content: 'hi' }], {})).toEqual([{ role: 'assistant', content: 'hi' }]);
   });
 });
+
+
+it('preserves assistant text and tool results across stop-reason continuations', async () => {
+  const { llm, requests } = scriptedLlm([
+    () => [{ type: 'text', delta: 'Partial answer' }, { type: 'finish', stopReason: 'max_tokens', rawStopReason: 'max_tokens', usage: { outputTokens: 2 } }],
+    () => [{ type: 'text', delta: ' still working' }, { type: 'finish', stopReason: 'pause' }],
+    () => [{ type: 'tool-call', callId: 'read-1', name: 'read', arguments: {} }, { type: 'finish', stopReason: 'tool_calls' }],
+    () => [{ type: 'text', delta: 'Done' }, { type: 'finish', stopReason: 'completed' }],
+  ]);
+  const onTurnEnd = vi.fn();
+  const session = await startSession(defineAgent({ model: cascade({ llm }), instructions: '', tools: { read: tool({ description: '', parameters: {}, run: () => 'document' }) as Tool<never, unknown> }, hooks: { onTurnEnd } }));
+  session.sendText('finish');
+  await vi.waitFor(() => expect(onTurnEnd).toHaveBeenCalledTimes(1));
+  expect(requests).toHaveLength(4);
+  expect(requests[1]!.messages).toEqual([{ role: 'user', content: 'finish' }, { role: 'assistant', content: 'Partial answer' }]);
+  expect(requests[3]!.messages).toContainEqual({ role: 'tool', callId: 'read-1', name: 'read', output: 'document' });
+  expect(onTurnEnd.mock.calls[0]![1]).toMatchObject({ continuations: 3, stopReason: 'completed', usage: { outputTokens: 2 } });
+  await session.close();
+});
+
+it('passes normalized and raw finish reasons after audio finishes', async () => {
+  const { llm } = scriptedLlm([() => [{ type: 'text', delta: 'Partial.' }, { type: 'finish', stopReason: 'max_tokens', rawStopReason: 'provider_limit' }]]);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const session = await cascade({ llm, tts: fakeTts(gate) }).connect({});
+  const ended = vi.fn();
+  session.on('response.end', ended);
+  session.sendText('go');
+  session.respond();
+  await flush();
+  expect(ended).not.toHaveBeenCalled();
+  release();
+  await vi.waitFor(() => expect(ended).toHaveBeenCalledWith(expect.objectContaining({ stopReason: 'max_tokens', rawStopReason: 'provider_limit' })));
+  await session.close();
+});

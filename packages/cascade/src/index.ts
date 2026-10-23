@@ -15,6 +15,7 @@ import {
   type RealtimeSession,
   type RespondOptions,
   type SessionConfig,
+  type StopReason,
   type ToolSpec,
   type Usage,
   type Vad,
@@ -45,7 +46,7 @@ export type TextPart =
   | { type: 'text'; delta: string }
   | { type: 'tool-call-delta'; callId: string; name: string; argumentsDelta: string }
   | { type: 'tool-call'; callId: string; name: string; arguments: unknown }
-  | { type: 'finish'; usage?: Usage };
+  | { type: 'finish'; usage?: Usage; stopReason?: StopReason; rawStopReason?: string };
 
 /** Any streaming text LLM (see `@vrealtime/ai-sdk` for every AI SDK provider). */
 export interface TextModel {
@@ -435,6 +436,8 @@ export class CascadeSession implements RealtimeSession {
       speaking = speaking.then(() => this.#speak(response, text, tts!));
     };
     let usage: Usage | undefined;
+    let stopReason: StopReason | undefined;
+    let rawStopReason: string | undefined;
     try {
       const request: TextRequest = {
         messages,
@@ -460,6 +463,8 @@ export class CascadeSession implements RealtimeSession {
             break;
           case 'finish':
             usage = part.usage;
+            stopReason = part.stopReason;
+            rawStopReason = part.rawStopReason;
             break;
         }
       }
@@ -473,12 +478,12 @@ export class CascadeSession implements RealtimeSession {
       this.#response = undefined;
       // An stt, llm or tts model that already speaks RealtimeError keeps its code.
       this.#emit({ type: 'error', error: RealtimeError.from(error, 'provider', { provider: 'cascade' }), recoverable: true });
-      this.#emit({ type: 'response.end', responseId: response.id, status: 'failed' });
+      this.#emit({ type: 'response.end', responseId: response.id, status: 'failed', stopReason: 'failed' });
       return;
     }
     if (signal.aborted || this.#response !== response) return;
     this.#response = undefined;
-    this.#emit({ type: 'response.end', responseId: response.id, status: 'done', ...(usage ? { usage } : {}) });
+    this.#emit({ type: 'response.end', responseId: response.id, status: 'done', stopReason: stopReason ?? (response.assistant.toolCalls?.length ? 'tool_calls' : 'completed'), ...(rawStopReason !== undefined ? { rawStopReason } : {}), ...(usage ? { usage } : {}) });
   }
 
   async #speak(response: ActiveResponse, text: string, tts: TtsModel): Promise<void> {
@@ -507,7 +512,7 @@ export class CascadeSession implements RealtimeSession {
     response.controller.abort();
     // Until the edge reports what was played, keep what was synthesized, not what was generated.
     if (this.#options.tts && this.#config.modalities !== 'text') response.assistant.content = response.segments.map((s) => s.text).join(' ');
-    this.#emit({ type: 'response.end', responseId: response.id, status });
+    this.#emit({ type: 'response.end', responseId: response.id, status, stopReason: 'cancelled' });
   }
 }
 

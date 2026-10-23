@@ -16,12 +16,14 @@ export type RealtimeEvent =
   | { type: 'output.audio'; responseId: string; itemId: string; chunk: AudioChunk }
   | { type: 'tool.call.delta'; responseId: string; callId: string; name: string; argumentsDelta: string }
   | { type: 'tool.call'; responseId: string; callId: string; name: string; arguments: unknown }
-  | { type: 'response.end'; responseId: string; status: ResponseStatus; usage?: Usage }
+  | { type: 'response.end'; responseId: string; status: ResponseStatus; stopReason?: StopReason; rawStopReason?: string; usage?: Usage }
   | { type: 'error'; error: Error; recoverable: boolean }
   /** Provider-specific event outside the normalized set (e.g. `conversation.context.summarized`). */
   | { type: 'extension'; name: string; data: unknown };
 
 export type ResponseStatus = 'done' | 'cancelled' | 'interrupted' | 'failed';
+/** Why generation stopped, independently of the transport's response status. */
+export type StopReason = 'completed' | 'tool_calls' | 'max_tokens' | 'pause' | 'refusal' | 'content_filter' | 'cancelled' | 'failed' | 'unknown';
 export type EventType = RealtimeEvent['type'];
 export type EventOf<T extends EventType> = Extract<RealtimeEvent, { type: T }>;
 

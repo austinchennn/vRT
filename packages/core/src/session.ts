@@ -2,7 +2,7 @@ import type { AgentDefinition, ToolCallInfo, Turn, TurnMetrics, TurnState } from
 import { pcm16DurationMs, type AudioChunk } from './audio.js';
 import { BoundedMap, BoundedSet } from './bounded.js';
 import { Emitter } from './emitter.js';
-import { addUsage, type EventOf, type RealtimeEvent } from './events.js';
+import { addUsage, type EventOf, type RealtimeEvent, type StopReason } from './events.js';
 import type { Capabilities, RealtimeSession, SessionConfig, ToolSpec } from './model.js';
 import { validateToolArgs, type Tool, type ToolResult } from './tool.js';
 import { ToolStreams, type ToolStreamEvent } from './tool-stream.js';
@@ -95,6 +95,7 @@ interface ResponseRecord {
   epoch: number;
   ended: boolean;
   calls: Set<string>;
+  stopReason?: StopReason;
 }
 
 interface AudioItem {
@@ -181,6 +182,7 @@ export class AgentSession {
   #closed = false;
 
   constructor(agent: AgentDefinition, model: RealtimeSession, options: { clientTools?: readonly ToolSpec[]; clock?: Clock; data?: unknown } = {}) {
+    validateContinuations(agent);
     this.agent = agent;
     this.data = options.data;
     this.#model = model;
@@ -315,6 +317,7 @@ export class AgentSession {
     this.#streams.interrupted(closedEpoch);
 
     this.#emitter.emit({ type: 'interrupted', epoch: closedEpoch, reason });
+    this.#metrics.stopReason = 'cancelled';
     this.#metrics.interruptLatencyMs = this.#clock.now() - startedAt;
     this.#endTurn(true);
     // Audio of the turn's earlier, already ended responses may still be playing too.
@@ -423,6 +426,7 @@ export class AgentSession {
   }
 
   #onResponseStart(responseId: string): void {
+    if (this.#responses.has(responseId) || this.#finished.has(responseId)) return;
     if (this.#discardNextResponse) {
       this.#discardNextResponse = false;
       this.#responses.set(responseId, { epoch: -1, ended: false, calls: new Set() });
@@ -437,15 +441,18 @@ export class AgentSession {
 
   #onResponseEnd(event: EventOf<'response.end'>): void {
     const response = this.#responses.get(event.responseId);
+    if (!response || response.ended || this.#finished.has(event.responseId)) return;
+    response.ended = true;
     if (this.#openResponse === event.responseId) this.#openResponse = undefined;
-    // Billed whether or not it was kept: stale and cancelled responses count too.
-    if (event.usage) this.#metrics.usage = addUsage(this.#metrics.usage, event.usage);
-    if (event.status === 'failed') this.#reportError(new Error(`Response ${event.responseId} failed`), true);
-    if (response === undefined || response.epoch !== this.#epoch) {
+    if (response.epoch !== this.#epoch) {
       this.#forgetResponse(event.responseId);
       return;
     }
-    response.ended = true;
+    if (event.usage) this.#metrics.usage = addUsage(this.#metrics.usage, event.usage);
+    response.stopReason = event.status === 'failed' ? 'failed'
+      : event.status === 'cancelled' || event.status === 'interrupted' ? 'cancelled'
+      : event.stopReason ?? (response.calls.size > 0 ? 'tool_calls' : 'completed');
+    this.#metrics.stopReason = response.stopReason;
     if (event.status === 'cancelled' || event.status === 'interrupted') {
       // The provider stopped the response on its own (e.g. its VAD heard speech first).
       this.#openResponse = event.responseId;
@@ -453,16 +460,12 @@ export class AgentSession {
       this.#forgetResponse(event.responseId);
       return;
     }
-    if (event.status === 'failed' && response.calls.size === 0) {
-      this.#forgetResponse(event.responseId);
-      this.#endTurn(false);
-      return;
-    }
     this.#continueAfter(event.responseId);
   }
 
   #onToolCall(event: EventOf<'tool.call'>): void {
     const response = this.#responses.get(event.responseId);
+    if (response?.ended) return;
     const epoch = response?.epoch ?? (this.#finished.has(event.responseId) ? -1 : this.#epoch);
     const where = this.#serverTools.has(event.name) ? 'server' : 'client';
     const callId = response ? this.#publicCallId(event.responseId, event.callId) : `call-${crypto.randomUUID()}`;
@@ -613,16 +616,35 @@ export class AgentSession {
   /** After a live response ends and all its calls settled: reply with the results, or end the turn. */
   #continueAfter(responseId: string): void {
     const response = this.#responses.get(responseId);
-    if (!response?.ended) return;
+    if (!response?.ended || response.epoch !== this.#epoch || !this.#turn || this.#closed) return;
     for (const callId of response.calls) if (this.#calls.get(callId)?.status !== 'settled') return;
     const hadCalls = response.calls.size > 0;
+    const reason = response.stopReason!;
     this.#forgetResponse(responseId);
-    if (!hadCalls) {
+    if (reason === 'refusal' || reason === 'content_filter' || reason === 'unknown' || reason === 'failed' || reason === 'cancelled' || (reason === 'tool_calls' && !hadCalls)) {
+      this.#reportError(new Error(`Generation stopped: ${reason}${reason === 'tool_calls' ? ' without tool calls' : ''}`), true);
       this.#endTurn(false);
       return;
     }
+    if (!hadCalls && reason === 'completed') {
+      this.#endTurn(false);
+      return;
+    }
+    if (!this.#takeContinuation()) return;
     this.#setState('thinking');
-    this.#requestResponse(true);
+    this.#requestResponse(hadCalls);
+  }
+
+  #takeContinuation(): boolean {
+    const count = this.#metrics.continuations ?? 0;
+    if (count >= (this.agent.maxContinuations ?? 16)) {
+      this.#metrics.stopReason = 'continuation_limit';
+      this.#reportError(new Error('Agent continuation_limit reached'), true);
+      this.#endTurn(false);
+      return false;
+    }
+    this.#metrics.continuations = count + 1;
+    return true;
   }
 
   #requestResponse(afterToolResults = false): void {
@@ -661,7 +683,7 @@ export class AgentSession {
     this.#epoch++;
     this.#turnCount++;
     this.#turnStartedAt = this.#clock.now();
-    this.#metrics = { toolCalls: 0 };
+    this.#metrics = { toolCalls: 0, continuations: 0 };
     this.#turn = { id: `turn-${crypto.randomUUID()}`, epoch: this.#epoch, state, interrupted: false, startedAt: this.#turnStartedAt };
     const turn = this.#turn;
     this.#hook(() => this.agent.hooks?.onTurnStart?.(turn));
@@ -701,8 +723,8 @@ export class AgentSession {
 
   /** The epoch of a live response, or undefined when its output must be dropped. */
   #liveEpoch(responseId: string): number | undefined {
-    const epoch = this.#responses.get(responseId)?.epoch;
-    return epoch === this.#epoch ? epoch : undefined;
+    const response = this.#responses.get(responseId);
+    return response && !response.ended && response.epoch === this.#epoch ? response.epoch : undefined;
   }
 
   #appendTranscript(role: 'user' | 'agent', itemId: string, text: string, delta = false): TranscriptItem {
@@ -794,6 +816,7 @@ export class AgentSession {
 
 /** Connects the agent's model and returns a running session. */
 export async function startSession(agent: AgentDefinition, options: StartSessionOptions = {}): Promise<AgentSession> {
+  validateContinuations(agent);
   const config: SessionConfig = {
     instructions: agent.instructions,
     tools: [...serverToolSpecs(agent), ...acceptedClientTools(agent, options.clientTools)],
@@ -803,6 +826,12 @@ export async function startSession(agent: AgentDefinition, options: StartSession
   };
   const model = await agent.model.connect(config, options.signal ? { signal: options.signal } : undefined);
   return new AgentSession(agent, model, options);
+}
+
+function validateContinuations(agent: AgentDefinition): void {
+  if (agent.maxContinuations !== undefined && (!Number.isSafeInteger(agent.maxContinuations) || agent.maxContinuations < 0)) {
+    throw new RangeError('maxContinuations must be a nonnegative safe integer');
+  }
 }
 
 export function serverToolSpecs(agent: AgentDefinition): ToolSpec[] {
