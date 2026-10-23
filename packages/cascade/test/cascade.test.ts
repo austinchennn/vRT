@@ -1,7 +1,7 @@
 import { RealtimeError, defineAgent, startSession, tool, type AgentEvent, type AudioChunk, type Tool } from '@vrealtime/core';
 import { energyVad } from '@vrealtime/vad';
 import { describe, expect, it, vi } from 'vitest';
-import { SentenceBuffer, cascade, type ChatMessage, type SttModel, type TextModel, type TextPart, type TextRequest, type TtsModel } from '../src/index.js';
+import { SentenceBuffer, cascade, trimHistory, type ChatMessage, type SttModel, type TextModel, type TextPart, type TextRequest, type TtsModel } from '../src/index.js';
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const pcm16k = { encoding: 'pcm16', sampleRate: 16000, channels: 1 } as const;
@@ -227,5 +227,101 @@ describe('cascade', () => {
     session.sendText('hi');
     await vi.waitFor(() => expect(events.some((e) => e.type === 'error')).toBe(true));
     expect(events.find((e) => e.type === 'error')).toMatchObject({ error: { code: 'quota', provider: 'anthropic', retryable: false } });
+  });
+
+  it('sends the whole history while a session is short', async () => {
+    const { llm, requests } = scriptedLlm([]);
+    const session = await cascade({ llm }).connect({});
+    for (const text of ['one', 'two', 'three']) {
+      session.sendText(text);
+      session.respond();
+      await vi.waitFor(() => expect(requests).toHaveLength(['one', 'two', 'three'].indexOf(text) + 1));
+      await flush();
+    }
+    expect(requests[2]!.messages).toEqual<ChatMessage[]>([
+      { role: 'user', content: 'one' },
+      { role: 'assistant', content: 'Okay.' },
+      { role: 'user', content: 'two' },
+      { role: 'assistant', content: 'Okay.' },
+      { role: 'user', content: 'three' },
+    ]);
+  });
+
+  it('sends only the recent history within the budget, and keeps memory bounded', async () => {
+    const { llm, requests } = scriptedLlm([]);
+    const session = await cascade({ llm, history: { maxMessages: 4, maxStoredMessages: 6 } }).connect({});
+    for (let i = 1; i <= 10; i++) {
+      session.sendText(`turn ${i}`);
+      session.respond();
+      await vi.waitFor(() => expect(requests).toHaveLength(i));
+      await flush();
+    }
+    // Starts on a user message: 3 messages, not an assistant reply plus 3.
+    expect(requests[9]!.messages).toEqual<ChatMessage[]>([
+      { role: 'user', content: 'turn 9' },
+      { role: 'assistant', content: 'Okay.' },
+      { role: 'user', content: 'turn 10' },
+    ]);
+    expect((session as unknown as { history: ChatMessage[] }).history.length).toBeLessThanOrEqual(6);
+  });
+
+  it('trims by approximate tokens and lets a hook replace the strategy', async () => {
+    const { llm, requests } = scriptedLlm([]);
+    const long = 'x'.repeat(800);
+    const session = await cascade({ llm, history: { maxTokens: 150 } }).connect({});
+    for (const text of [long, 'short']) {
+      session.sendText(text);
+      session.respond();
+      await vi.waitFor(() => expect(requests).toHaveLength(text === long ? 1 : 2));
+      await flush();
+    }
+    expect(requests[1]!.messages).toEqual([{ role: 'user', content: 'short' }]);
+
+    const processed = scriptedLlm([]);
+    const hooked = await cascade({ llm: processed.llm, history: { process: (messages) => messages.filter((m) => m.role === 'user') } }).connect({});
+    hooked.sendText('a');
+    hooked.respond();
+    await vi.waitFor(() => expect(processed.requests).toHaveLength(1));
+    await flush();
+    hooked.sendText('b');
+    hooked.respond();
+    await vi.waitFor(() => expect(processed.requests).toHaveLength(2));
+    expect(processed.requests[1]!.messages).toEqual([{ role: 'user', content: 'a' }, { role: 'user', content: 'b' }]);
+  });
+});
+
+describe('trimHistory', () => {
+  const call = (id: string): ChatMessage => ({ role: 'assistant', content: '', toolCalls: [{ callId: id, name: 'f', arguments: {} }] });
+  const result = (id: string): ChatMessage => ({ role: 'tool', callId: id, name: 'f', output: 'ok' });
+
+  it('never splits a tool call from its results', () => {
+    const messages: ChatMessage[] = [{ role: 'user', content: 'q' }, call('c1'), result('c1'), { role: 'assistant', content: 'done' }, { role: 'user', content: 'again' }, call('c2'), result('c2'), result('c2b')];
+    (messages[5] as Extract<ChatMessage, { role: 'assistant' }>).toolCalls!.push({ callId: 'c2b', name: 'f', arguments: {} });
+    for (let max = 1; max <= messages.length; max++) {
+      const kept = trimHistory(messages, { maxMessages: max });
+      expect(kept[0]!.role).not.toBe('tool');
+      for (const message of kept) {
+        if (message.role !== 'tool') continue;
+        expect(kept.some((m) => m.role === 'assistant' && m.toolCalls?.some((c) => c.callId === message.callId))).toBe(true);
+      }
+    }
+    // Too small for the last turn: it still starts at the last place it can, with its pair.
+    expect(trimHistory(messages, { maxMessages: 2 })).toEqual(messages.slice(4));
+    expect(trimHistory(messages, { maxMessages: 4 })).toEqual(messages.slice(4));
+    expect(trimHistory(messages, { maxMessages: 7 })).toEqual(messages.slice(4));
+    expect(trimHistory(messages, { maxMessages: 8 })).toEqual(messages);
+  });
+
+  it('keeps a tool result that arrives after a later user message with its call', () => {
+    const messages: ChatMessage[] = [{ role: 'user', content: 'q' }, call('c1'), { role: 'user', content: 'still there?' }, result('c1')];
+    // The user message in between is not a valid start: it would orphan the result.
+    expect(trimHistory(messages, { maxMessages: 3 })).toEqual(messages.slice(1));
+    expect(trimHistory(messages, { maxMessages: 2 })).toEqual(messages);
+  });
+
+  it('drops tool results whose call is already gone', () => {
+    const messages: ChatMessage[] = [result('gone'), { role: 'assistant', content: 'hi' }, { role: 'user', content: 'q' }];
+    expect(trimHistory(messages, {})).toEqual(messages.slice(2));
+    expect(trimHistory([result('gone'), { role: 'assistant', content: 'hi' }], {})).toEqual([{ role: 'assistant', content: 'hi' }]);
   });
 });
