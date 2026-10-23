@@ -228,7 +228,7 @@ describe('boson events', () => {
       { type: 'output.audio', responseId: 'resp_1', itemId: 'a1', chunk: { data: audio, format: pcm24, durationMs: 20 } },
       { type: 'tool.call.delta', responseId: 'resp_1', callId: 'call_1', name: 'paint', argumentsDelta: '{"color"' },
       { type: 'tool.call', responseId: 'resp_1', callId: 'call_1', name: 'paint', arguments: { color: 'red' } },
-      { type: 'response.end', responseId: 'resp_1', status: 'done', usage: { inputTokens: 84, outputTokens: 16, cachedInputTokens: 0 } },
+      { type: 'response.end', responseId: 'resp_1', status: 'done', stopReason: 'completed', usage: { inputTokens: 84, outputTokens: 16, cachedInputTokens: 0 } },
     ]);
   });
 
@@ -331,7 +331,7 @@ describe('boson events', () => {
     expect(events).toEqual([
       { type: 'response.start', responseId: 'resp_t' },
       { type: 'output.text', responseId: 'resp_t', delta: 'Hello' },
-      { type: 'response.end', responseId: 'resp_t', status: 'done' },
+      { type: 'response.end', responseId: 'resp_t', status: 'done', stopReason: 'completed' },
     ]);
   });
 
@@ -382,5 +382,26 @@ describe('boson events', () => {
     session.sendText('x');
     session.sendAudio({ data: new Uint8Array(2), format: pcm24 });
     expect(socket.sent).toHaveLength(before);
+  });
+});
+
+
+describe('provider stop reasons', () => {
+  it.each([
+    ['completed', undefined, [], 'completed', 'done'],
+    ['completed', undefined, [{ type: 'function_call' }], 'tool_calls', 'done'],
+    ['incomplete', 'max_output_tokens', [], 'max_tokens', 'done'],
+    ['incomplete', 'max_tokens', [], 'max_tokens', 'done'],
+    ['incomplete', 'content_filter', [], 'content_filter', 'done'],
+    ['incomplete', 'future_reason', [], 'unknown', 'done'],
+    ['incomplete', undefined, [], 'unknown', 'done'],
+    ['future_status', undefined, [], 'unknown', 'done'],
+    ['cancelled', 'max_output_tokens', [], 'cancelled', 'cancelled'],
+    ['cancelled', 'turn_detected', [], 'cancelled', 'interrupted'],
+    ['failed', 'max_output_tokens', [], 'failed', 'failed'],
+  ])('maps %s / %s', async (status, reason, output, stopReason, normalizedStatus) => {
+    const { socket, events } = await connect();
+    socket.server({ type: 'response.done', response: { id: 'r', status, status_details: { reason }, output } });
+    expect(events.at(-1)).toEqual({ type: 'response.end', responseId: 'r', status: normalizedStatus, stopReason, ...(reason !== undefined ? { rawStopReason: reason } : {}) });
   });
 });

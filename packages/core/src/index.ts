@@ -5,7 +5,7 @@ export { Emitter } from './emitter.js';
 export { RealtimeError, isRealtimeError } from './errors.js';
 export type { RealtimeErrorCode, RealtimeErrorOptions } from './errors.js';
 export { addUsage } from './events.js';
-export type { EventOf, EventType, RealtimeEvent, ResponseStatus, Usage } from './events.js';
+export type { EventOf, EventType, RealtimeEvent, ResponseStatus, StopReason, Usage } from './events.js';
 export type { Capabilities, RealtimeModel, RealtimeSession, RespondOptions, SessionConfig, ToolSpec } from './model.js';
 export { tool, validateToolArgs } from './tool.js';
 export type { JsonSchema, StandardResult, StandardSchemaV1, Tool, ToolContext, ToolFailure, ToolResult, ToolRisk } from './tool.js';
