@@ -1,6 +1,6 @@
 {
   "name": "@vrealtime/vosk",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "vRealTime streaming speech-to-text through a Vosk server, for cascade",
   "license": "Apache-2.0",
   "repository": {

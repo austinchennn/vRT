@@ -1,6 +1,6 @@
 {
   "name": "@vrealtime/ai-sdk",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Vercel AI SDK language models as vRealTime cascade text models",
   "license": "Apache-2.0",
   "repository": {
@@ -40,7 +40,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@vrealtime/cascade": "0.2.0"
+    "@vrealtime/cascade": "0.2.1"
   },
   "peerDependencies": {
     "ai": ">=7.0.0"

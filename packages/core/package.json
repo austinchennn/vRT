@@ -1,6 +1,6 @@
 {
   "name": "@vrealtime/core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "vRealTime core: realtime model interface, normalized events and the agent runtime with interrupt guarantees",
   "license": "Apache-2.0",
   "repository": {
