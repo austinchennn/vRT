@@ -20,9 +20,11 @@ import {
   type Vad,
   type VadFactory,
 } from '@vrealtime/core';
+import { MAX_MESSAGES, MAX_TOKENS, trimHistory, type HistoryLimits } from './history.js';
 import { SentenceBuffer } from './sentences.js';
 import { StreamingTranscription, type Pcm16Format, type SttModel, type SttOptions, type StreamingLimits, type StreamingSttModel } from './stt.js';
 
+export { estimateTokens, trimHistory, type HistoryLimits } from './history.js';
 export { SentenceBuffer } from './sentences.js';
 export type { Pcm16Format, SttModel, SttOptions, SttResult, SttStream, StreamingLimits, StreamingSttModel, TranscriptionUpdate } from './stt.js';
 
@@ -75,6 +77,8 @@ export interface CascadeOptions {
   maxUtteranceMs?: number;
   /** Bounds for a streaming stt. */
   streaming?: StreamingLimits;
+  /** How much of the conversation is sent to the llm and kept in memory; instructions are always sent. */
+  history?: HistoryLimits;
 }
 
 interface Segment {
@@ -250,7 +254,7 @@ export class CascadeSession implements RealtimeSession {
 
   sendText(text: string): void {
     this.#after(() => {
-      this.history.push({ role: 'user', content: text });
+      this.#remember({ role: 'user', content: text });
     });
   }
 
@@ -287,7 +291,7 @@ export class CascadeSession implements RealtimeSession {
   submitToolResult(callId: string, output: unknown, options?: { respond?: boolean }): void {
     this.#after(() => {
       const name = this.#toolName(callId);
-      this.history.push({ role: 'tool', callId, name, output });
+      this.#remember({ role: 'tool', callId, name, output });
     });
     if (options?.respond !== false) this.respond();
   }
@@ -368,8 +372,25 @@ export class CascadeSession implements RealtimeSession {
 
   #heard(text: string | undefined, autoRespond: boolean): void {
     if (this.#closed || !text) return;
-    this.history.push({ role: 'user', content: text });
+    this.#remember({ role: 'user', content: text });
     if (autoRespond && !this.#vad?.speaking) this.#start();
+  }
+
+  /** Adds to the history, dropping the oldest messages past `maxStoredMessages`. */
+  #remember(message: ChatMessage): void {
+    this.history.push(message);
+    const limits = this.#options.history;
+    const max = limits?.maxStoredMessages ?? 2 * (limits?.maxMessages ?? MAX_MESSAGES);
+    if (this.history.length <= max) return;
+    const kept = trimHistory(this.history, { maxMessages: max });
+    this.history.splice(0, this.history.length - kept.length);
+  }
+
+  /** What the next request sends: the recent history within the budget. */
+  #window(): ChatMessage[] {
+    const limits = this.#options.history;
+    if (limits?.process) return [...limits.process(this.history)];
+    return trimHistory(this.history, { maxMessages: limits?.maxMessages ?? MAX_MESSAGES, maxTokens: limits?.maxTokens ?? MAX_TOKENS });
   }
 
   #toolName(callId: string): string {
@@ -397,8 +418,8 @@ export class CascadeSession implements RealtimeSession {
       segments: [],
       audioMs: 0,
     };
-    const messages = this.history.slice();
-    this.history.push(response.assistant);
+    const messages = this.#window();
+    this.#remember(response.assistant);
     this.#response = response;
     this.#items.set(response.itemId, response);
     this.#emit({ type: 'response.start', responseId: id });
