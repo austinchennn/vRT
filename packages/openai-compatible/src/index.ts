@@ -489,3 +489,31 @@ function waitForOpen(socket: ProviderSocket, { provider, errors }: CompatibleOpt
     });
   });
 }
+
+/**
+ * A streamed PCM16 HTTP body as whole samples: network chunks can split a sample,
+ * so an odd byte is carried to the next chunk.
+ */
+export async function* pcm16Chunks(body: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
+  let carry: number | undefined;
+  const reader = body.getReader();
+  try {
+    for (let read = await reader.read(); !read.done; read = await reader.read()) {
+      let bytes = read.value;
+      if (carry !== undefined) {
+        const joined = new Uint8Array(bytes.byteLength + 1);
+        joined[0] = carry;
+        joined.set(bytes, 1);
+        bytes = joined;
+        carry = undefined;
+      }
+      if (bytes.byteLength % 2 === 1) {
+        carry = bytes[bytes.byteLength - 1];
+        bytes = bytes.subarray(0, bytes.byteLength - 1);
+      }
+      if (bytes.byteLength > 0) yield bytes;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

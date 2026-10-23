@@ -1,3 +1,5 @@
+import { pcm16Chunks } from '@vrealtime/openai-compatible';
+
 /**
  * OpenAI (or OpenAI-compatible) HTTP speech endpoints as cascade parts:
  * `cascade({ stt: openaiStt(), llm, tts: openaiTts() })`. The shapes match
@@ -106,28 +108,7 @@ export function openaiTts(options: TtsOptions = {}) {
         signal: call.signal,
       });
       if (!response.ok || !response.body) throw await failure(response, 'speech');
-      // Network chunks can split a sample; carry the odd byte to the next chunk.
-      let carry: number | undefined;
-      const reader = response.body.getReader();
-      try {
-        for (let read = await reader.read(); !read.done; read = await reader.read()) {
-          let bytes = read.value;
-          if (carry !== undefined) {
-            const joined = new Uint8Array(bytes.byteLength + 1);
-            joined[0] = carry;
-            joined.set(bytes, 1);
-            bytes = joined;
-            carry = undefined;
-          }
-          if (bytes.byteLength % 2 === 1) {
-            carry = bytes[bytes.byteLength - 1];
-            bytes = bytes.subarray(0, bytes.byteLength - 1);
-          }
-          if (bytes.byteLength > 0) yield bytes;
-        }
-      } finally {
-        reader.releaseLock();
-      }
+      yield* pcm16Chunks(response.body);
     },
   };
 }

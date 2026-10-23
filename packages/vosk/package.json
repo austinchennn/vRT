@@ -1,0 +1,44 @@
+{
+  "name": "@vrealtime/vosk",
+  "version": "0.2.0",
+  "description": "vRealTime streaming speech-to-text through a Vosk server, for cascade",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/austinchennn/vRT.git",
+    "directory": "packages/vosk"
+  },
+  "homepage": "https://github.com/austinchennn/vRT#readme",
+  "bugs": "https://github.com/austinchennn/vRT/issues",
+  "keywords": [
+    "realtime",
+    "voice",
+    "agent",
+    "websocket",
+    "vrealtime",
+    "vosk",
+    "speech-to-text"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "@vrealtime/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  }
+}

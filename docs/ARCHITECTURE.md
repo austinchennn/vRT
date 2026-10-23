@@ -287,14 +287,32 @@ session.interrupt();
 
 ```ts
 const model = cascade({
-  stt: deepgram(),                       // 或 boson.stt()
-  llm: aiSdk(anthropic('claude-sonnet-5-5')), // 任意 Vercel AI SDK 模型
-  tts: boson.tts({ voice: 'default' }),  // Higgs TTS 3
+  stt: voskStt({ url: 'ws://localhost:2700' }), // 流式，自建 Vosk 服务；或批量的 openaiStt()
+  llm: aiSdk(anthropic('claude-sonnet-5-5')),   // 任意 Vercel AI SDK 模型
+  tts: bosonTts({ voice: 'default' }),          // Higgs TTS 3；或 openaiTts()
   vad: energyVad(),
 });
 ```
 
 `cascade()` 返回的仍是 `RealtimeModel`，L2、L3 完全不用改。`@vrealtime/ai-sdk` 把 Vercel AI SDK 的 `LanguageModel` 适配成 cascade 的文本模型，一次就覆盖它支持的所有 LLM 供应商，这是"像 LangChain 一样覆盖面广"最省力的做法。
+
+### 8.1 流式转写（可选）
+
+`stt` 默认是批量的 `SttModel.transcribe()`：一句话说完才转写一次。带 `mode: 'stream'` 的 `StreamingSttModel` 改为每句话 `open()` 一个 `SttStream`，边说边 `write()` 音频，说完 `end()`，`results` 依次给出整句的猜测。只靠 `mode` 区分，不看有没有某个方法，旧的 batch 实现一行不用改。
+
+参考实现是 `@vrealtime/vosk` 的 `voskStt()`，连接开源的 [Vosk](https://alphacephei.com/vosk/server) 服务（Kaldi，本地运行、不需要 key）。Vosk 在每个停顿处结束一段、下一段从空开始，适配器把已结束的段和当前猜测拼成整句再交给 cascade；供应商给的是增量还是分段，都由适配器换算成整句替换。`npm run test:live` 里有一条端到端测试：Vosk 听、本地 Ollama 回答、Boson TTS 说。
+
+| 规则 | 内容 |
+|---|---|
+| 身份 | 一句话一个 `itemId`（`cascade-user-N`）。revision 由 cascade 按模型给出的顺序编号，从 1 开始逐条加一；它不是 epoch，和 turn 也不是一一对应 |
+| 替换 | 每条 `input.transcript` 是整句的完整文本，替换同一 `itemId` 之前的文本；和上一条相同的猜测不算新 revision |
+| final | 第一条 final 生效，之后的结果全部忽略。只有 final 进入对话历史、能触发回复；interim 不进入会执行工具的正式链路。多句话按说话顺序进入历史，不按 final 到达顺序 |
+| 空与失败 | 什么也没识别到、也没显示过猜测：不发转写（和 batch 返回 `''` 一样）。显示过猜测的句子一定以 final 结束：识别为空、失败、被丢弃时 final 为空串，界面不会残留永远不会确认的猜测；失败另发 `transcription` 错误 |
+| 取消 | 每句话有自己的 `AbortSignal`（同时挂在 session 生命周期上）。final、失败、`clearAudio()`、超限、`close()` 都会 abort 它并停止读取 `results`；之后到达的结果一律丢弃 |
+| 上限 | `maxUtteranceMs`（默认 120 s，batch 也适用）：超出的音频丢弃到这句话结束，报一次错。`streaming.maxUtterances`（默认 4）：同时转写的句子数，超出丢最旧的。`streaming.finalTimeoutMs`（默认 10 s）：`end()` 后等 final 的时间 |
+| 热路径 | `write()` 必须立即返回（自行缓冲或丢弃），cascade 不排队、不等待；`results` 由 cascade 立即消费，不积压 |
+
+`revision` 只出现在 core 的 `input.transcript` 和 `AgentSession` 的 `transcript` 事件上（进程内），不上 wire；`Capabilities.inputTranscription` 仍是布尔值，不区分 interim。需要在客户端区分时，再按 spec 流程加 capability。
 
 ## 9. Boson 适配器映射（OpenAI Realtime GA 兼容）
 

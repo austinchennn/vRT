@@ -2,6 +2,7 @@ import { RealtimeError, type AudioFormat, type Capabilities, type RealtimeModel,
 import { createCompatibleModel, type ErrorTables, type SocketFactory } from '@vrealtime/openai-compatible';
 
 export { fetchSocket } from '@vrealtime/openai-compatible';
+export { bosonTts, type BosonTtsOptions } from './speech.js';
 export type { ProviderSocket, SocketFactory } from '@vrealtime/openai-compatible';
 
 export const BOSON_REALTIME_URL = 'wss://api.boson.ai/v1/realtime';

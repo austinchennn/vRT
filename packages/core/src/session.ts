@@ -27,7 +27,8 @@ export type InterruptReason = 'speech' | 'user' | 'keyboard';
 export type AgentEvent =
   | { type: 'ready'; sessionId: string }
   | { type: 'turn.state'; turnId: string; epoch: number; state: TurnState }
-  | { type: 'transcript'; role: 'user' | 'agent'; itemId: string; text: string; final: boolean }
+  /** `revision`: set for user items when the model numbers its guesses (not sent on the wire). */
+  | { type: 'transcript'; role: 'user' | 'agent'; itemId: string; text: string; final: boolean; revision?: number }
   | { type: 'text'; responseId: string; epoch: number; delta: string }
   | { type: 'audio'; responseId: string; itemId: string; epoch: number; chunk: AudioChunk }
   /** A client tool to run in the app; answer with `submitClientToolResult`. */
@@ -372,7 +373,7 @@ export class AgentSession {
     });
     on('input.transcript', (event) => {
       if (event.final) this.#appendTranscript('user', event.itemId, event.text);
-      this.#emitter.emit({ type: 'transcript', role: 'user', itemId: event.itemId, text: event.text, final: event.final });
+      this.#emitter.emit({ type: 'transcript', role: 'user', itemId: event.itemId, text: event.text, final: event.final, ...(event.revision !== undefined ? { revision: event.revision } : {}) });
       const turn = this.#turn;
       if (turn) this.#hook(() => this.agent.hooks?.onTranscript?.(event.text, event.final, turn));
     });
