@@ -1,6 +1,6 @@
 {
   "name": "@vrealtime/server",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "vRealTime server: attach any WebSocket, Node serve(), Cloudflare Workers and Durable Objects",
   "license": "Apache-2.0",
   "repository": {
@@ -50,8 +50,8 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@vrealtime/core": "0.2.1",
-    "@vrealtime/protocol": "0.2.1"
+    "@vrealtime/core": "0.2.2",
+    "@vrealtime/protocol": "0.2.2"
   },
   "peerDependencies": {
     "ws": "^8.0.0"
