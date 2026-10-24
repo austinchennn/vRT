@@ -1,6 +1,6 @@
 {
   "name": "@vrealtime/openai",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "OpenAI Realtime adapter for vRealTime, plus HTTP speech-to-text and text-to-speech for cascade",
   "license": "Apache-2.0",
   "repository": {
@@ -40,7 +40,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@vrealtime/core": "0.2.1",
-    "@vrealtime/openai-compatible": "0.2.1"
+    "@vrealtime/core": "0.2.2",
+    "@vrealtime/openai-compatible": "0.2.2"
   }
 }

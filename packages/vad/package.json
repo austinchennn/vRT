@@ -1,6 +1,6 @@
 {
   "name": "@vrealtime/vad",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Energy voice activity detection for vRealTime",
   "license": "Apache-2.0",
   "repository": {
@@ -40,6 +40,6 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@vrealtime/core": "0.2.1"
+    "@vrealtime/core": "0.2.2"
   }
 }

@@ -81,8 +81,26 @@ export interface CompatibleOptions {
   readyOn?: 'session.created' | 'session.updated';
   /** How the provider's errors map onto `RealtimeErrorCode`, on top of `OPENAI_ERROR_TYPES`. */
   errors?: ErrorTables;
+  /**
+   * Tools the provider runs itself, sent as-is next to the app's function tools
+   * (Boson's `{ type: 'web_search' }`). Their `type` is a reserved tool name.
+   */
+  builtinTools?: readonly BuiltinTool[];
   socket?: SocketFactory;
 }
+
+/** A provider-executed tool in its wire form, e.g. `{ type: 'web_search', allowed_domains: ['example.org'] }`. */
+export interface BuiltinTool {
+  readonly type: string;
+  readonly [option: string]: unknown;
+}
+
+/**
+ * Extension events for calls the provider executes itself (`executor: "server"`).
+ * They are never `tool.call`s: the app must not answer them, and the provider replies on its own.
+ */
+export const SERVER_TOOL_CALL = 'server_tool.call';
+export const SERVER_TOOL_RESULT = 'server_tool.result';
 
 /**
  * A provider's error vocabulary as data, so a provider differs from the base by
@@ -115,6 +133,8 @@ export const MAX_APPEND_BYTES = 785_408;
  * streamed, and items whose final transcript was emitted (a repeat `completed` is dropped).
  */
 export const TRANSCRIPT_MEMORY = 64;
+/** Provider-executed calls remembered until their result arrives; an unanswered one cannot pin memory. */
+export const SERVER_CALL_MEMORY = 64;
 const OPEN = 1;
 const DEFAULT_FORMAT: AudioFormat = { encoding: 'pcm16', sampleRate: 24000, channels: 1 };
 
@@ -129,15 +149,31 @@ export function wireFormat(format: AudioFormat): Record<string, unknown> {
   }
 }
 
-/** Translates (a partial) `SessionConfig` into a GA `session` object; only provided fields are sent. */
-export function sessionPayload(config: Partial<SessionConfig>, options: { model?: string; transcriptionModel: string }): Record<string, unknown> {
+/** Function tools that would take a built-in tool's reserved name. */
+export function conflictingTools(config: Partial<SessionConfig>, builtinTools: readonly BuiltinTool[] = []): string[] {
+  const reserved = new Set(builtinTools.map((tool) => tool.type));
+  return (config.tools ?? []).filter((tool) => reserved.has(tool.name)).map((tool) => tool.name);
+}
+
+/**
+ * Translates (a partial) `SessionConfig` into a GA `session` object; only provided fields are sent.
+ * Built-in tools go with every tool list, since a `tools` update replaces the whole list;
+ * a function tool with a built-in's reserved name is left out.
+ */
+export function sessionPayload(config: Partial<SessionConfig>, options: { model?: string; transcriptionModel: string; builtinTools?: readonly BuiltinTool[] }): Record<string, unknown> {
   const session: Record<string, unknown> = { type: 'realtime' };
   if (options.model !== undefined) session['model'] = options.model;
   if (config.instructions !== undefined) session['instructions'] = config.instructions;
   if (config.modalities !== undefined) session['output_modalities'] = [config.modalities];
   if (config.temperature !== undefined) session['temperature'] = config.temperature;
   if (config.tools !== undefined) {
-    session['tools'] = config.tools.map((tool) => ({ type: 'function', name: tool.name, description: tool.description, parameters: tool.parameters }));
+    const builtins = options.builtinTools ?? [];
+    const reserved = new Set(builtins.map((tool) => tool.type));
+    session['tools'] = [
+      ...config.tools.filter((tool) => !reserved.has(tool.name)).map((tool) => ({ type: 'function', name: tool.name, description: tool.description, parameters: tool.parameters })),
+      ...builtins,
+    ];
+    // The model decides when to call any of them, built-ins included.
     session['tool_choice'] = 'auto';
   }
   const input: Record<string, unknown> = {};
@@ -174,7 +210,15 @@ function responseStatus(response: { status?: string; status_details?: { reason?:
   }
 }
 
-function stopReasonOf(response: Json | undefined): StopReason {
+/**
+ * Whether a call is run by the provider itself: marked `executor: "server"`, or (for
+ * providers that omit the mark) named after one of the session's built-in tools.
+ */
+function isServerCall(item: Json | undefined, reserved: ReadonlySet<string>): boolean {
+  return item?.['executor'] === 'server' || (item?.['executor'] === undefined && reserved.has(item?.['name']));
+}
+
+function stopReasonOf(response: Json | undefined, reserved: ReadonlySet<string>): StopReason {
   if (response?.['status'] === 'cancelled') return 'cancelled';
   if (response?.['status'] === 'failed') return 'failed';
   const reason = response?.['status_details']?.reason;
@@ -183,7 +227,8 @@ function stopReasonOf(response: Json | undefined): StopReason {
     return reason === 'max_output_tokens' || reason === 'max_tokens' ? 'max_tokens' : 'unknown';
   }
   if (response?.['status'] === 'completed') {
-    return response['output']?.some((item: Json) => item['type'] === 'function_call') ? 'tool_calls' : 'completed';
+    // A provider-run call is not the app's to answer: the provider continues with its result in a response of its own.
+    return response['output']?.some((item: Json) => item['type'] === 'function_call' && !isServerCall(item, reserved)) ? 'tool_calls' : 'completed';
   }
   return 'unknown';
 }
@@ -222,6 +267,10 @@ export class CompatibleSession implements RealtimeSession {
   /** A session-limit event the provider sent; the normal close after it is a `session_limit`. */
   #sessionLimit: string | undefined;
   readonly #callNames = new Map<string, string>();
+  /** Calls the provider runs itself, by call id → name, until their result arrives. */
+  readonly #serverCalls = new BoundedMap<string, string>(SERVER_CALL_MEMORY);
+  /** Names of the session's built-in tools, which only the provider may call. */
+  readonly #reserved: ReadonlySet<string>;
   /** Partial user transcripts by item; a transcription that fails or never completes cannot pin them. */
   readonly #userTranscripts = new BoundedMap<string, string>(TRANSCRIPT_MEMORY);
   readonly #finalTranscripts = new BoundedSet<string>(TRANSCRIPT_MEMORY);
@@ -231,6 +280,7 @@ export class CompatibleSession implements RealtimeSession {
     this.#options = options;
     this.capabilities = options.capabilities;
     this.#errorTypes = { ...OPENAI_ERROR_TYPES, ...options.errors?.errorTypes };
+    this.#reserved = new Set((options.builtinTools ?? []).map((tool) => tool.type));
     this.#inputFormat = config.inputFormat ?? DEFAULT_FORMAT;
     this.#outputFormat = config.outputFormat ?? DEFAULT_FORMAT;
     socket.addEventListener('message', (event) => this.#onMessage(event.data));
@@ -244,7 +294,11 @@ export class CompatibleSession implements RealtimeSession {
   async update(config: Partial<SessionConfig>): Promise<void> {
     if (config.inputFormat) this.#setInputFormat(config.inputFormat);
     if (config.outputFormat) this.#outputFormat = config.outputFormat;
-    this.#send({ type: 'session.update', session: sessionPayload(config, { transcriptionModel: this.#options.transcriptionModel }) });
+    const conflicts = conflictingTools(config, this.#options.builtinTools);
+    if (conflicts.length > 0) {
+      this.#emit({ type: 'error', error: this.#error('invalid_request', `Tool name ${conflicts.join(', ')} is reserved for a built-in tool; that function tool was not sent`), recoverable: true });
+    }
+    this.#send({ type: 'session.update', session: sessionPayload(config, { transcriptionModel: this.#options.transcriptionModel, ...(this.#options.builtinTools ? { builtinTools: this.#options.builtinTools } : {}) }) });
   }
 
   sendAudio(chunk: AudioChunk): void {
@@ -411,10 +465,24 @@ export class CompatibleSession implements RealtimeSession {
       }
       case 'response.output_item.added': {
         const item = message['item'];
-        if (item?.type === 'function_call') this.#callNames.set(item.call_id, item.name);
+        if (item?.type !== 'function_call') return;
+        if (isServerCall(item, this.#reserved)) this.#serverCalls.set(item.call_id, item.name);
+        else this.#callNames.set(item.call_id, item.name);
+        return;
+      }
+      case 'conversation.item.added':
+      case 'conversation.item.created':
+      case 'conversation.item.done': {
+        // The provider adds the result of a call it ran, then answers in a response of its own.
+        const item = message['item'];
+        if (item?.type !== 'function_call_output' || !this.#serverCalls.has(item.call_id)) return;
+        const name = this.#serverCalls.get(item.call_id)!;
+        this.#serverCalls.delete(item.call_id);
+        this.#emit({ type: 'extension', name: SERVER_TOOL_RESULT, data: { callId: item.call_id, name } });
         return;
       }
       case 'response.function_call_arguments.delta':
+        if (this.#serverCalls.has(message['call_id'])) return;
         this.#emit({
           type: 'tool.call.delta',
           responseId: message['response_id'],
@@ -425,14 +493,20 @@ export class CompatibleSession implements RealtimeSession {
         return;
       case 'response.function_call_arguments.done': {
         const callId = message['call_id'] as string;
-        const name = (message['name'] as string | undefined) ?? this.#callNames.get(callId) ?? '';
-        this.#callNames.delete(callId);
+        const name = (message['name'] as string | undefined) ?? this.#callNames.get(callId) ?? this.#serverCalls.get(callId) ?? '';
         let args: unknown = message['arguments'];
         try {
           args = JSON.parse(String(message['arguments'] ?? '{}'));
         } catch {
           // Leave malformed arguments as the raw string; tool validation reports it.
         }
+        // Never a tool.call: answering it (function_call_output, response.create) would make the provider reply without the result.
+        if (this.#serverCalls.has(callId) || (!this.#callNames.has(callId) && this.#reserved.has(name))) {
+          this.#serverCalls.set(callId, name);
+          this.#emit({ type: 'extension', name: SERVER_TOOL_CALL, data: { responseId: message['response_id'], callId, name, arguments: args } });
+          return;
+        }
+        this.#callNames.delete(callId);
         this.#emit({ type: 'tool.call', responseId: message['response_id'], callId, name, arguments: args });
         return;
       }
@@ -440,7 +514,7 @@ export class CompatibleSession implements RealtimeSession {
         const response = message['response'];
         const usage = usageOf(response?.usage);
         const rawStopReason = response?.status_details?.reason;
-        this.#emit({ type: 'response.end', responseId: response?.id, status: responseStatus(response), stopReason: stopReasonOf(response), ...(typeof rawStopReason === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(rawStopReason) ? { rawStopReason } : {}), ...(usage ? { usage } : {}) });
+        this.#emit({ type: 'response.end', responseId: response?.id, status: responseStatus(response), stopReason: stopReasonOf(response, this.#reserved), ...(typeof rawStopReason === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(rawStopReason) ? { rawStopReason } : {}), ...(usage ? { usage } : {}) });
         return;
       }
       case 'error': {
@@ -465,7 +539,13 @@ export function createCompatibleModel(options: CompatibleOptions): RealtimeModel
     async connect(config, connectOptions) {
       const signal = connectOptions?.signal;
       signal?.throwIfAborted();
-      const merged: SessionConfig = { ...options.defaults, ...config };
+      const builtins = options.builtinTools ?? [];
+      // Built-ins are offered even when the app declares no tools of its own.
+      const merged: SessionConfig = { ...options.defaults, ...config, ...(builtins.length > 0 && config.tools === undefined ? { tools: [] } : {}) };
+      const conflicts = conflictingTools(merged, builtins);
+      if (conflicts.length > 0) {
+        throw new RealtimeError('invalid_request', `${options.provider}: tool name ${conflicts.join(', ')} is reserved for a built-in tool; rename that function tool`, { provider: options.provider });
+      }
       const socket = await (options.socket ?? defaultSocketFactory)(options.url, options.headers);
       if (signal?.aborted) {
         socket.close(1000, 'aborted');
@@ -474,7 +554,7 @@ export function createCompatibleModel(options: CompatibleOptions): RealtimeModel
       if (socket.readyState > OPEN) throw new RealtimeError('connection', `${options.provider}: connection closed before open`, { provider: options.provider });
       const session = new CompatibleSession(socket, merged, options);
       if (socket.readyState !== OPEN) await waitForOpen(socket, options, signal);
-      socket.send(JSON.stringify({ type: 'session.update', session: sessionPayload(merged, options) }));
+      socket.send(JSON.stringify({ type: 'session.update', session: sessionPayload(merged, { ...options, builtinTools: builtins }) }));
       return session;
     },
   };

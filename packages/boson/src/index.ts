@@ -1,11 +1,27 @@
 import { RealtimeError, type AudioFormat, type Capabilities, type RealtimeModel, type SessionConfig } from '@vrealtime/core';
-import { createCompatibleModel, type ErrorTables, type SocketFactory } from '@vrealtime/openai-compatible';
+import { createCompatibleModel, type BuiltinTool, type ErrorTables, type SocketFactory } from '@vrealtime/openai-compatible';
 
-export { fetchSocket } from '@vrealtime/openai-compatible';
+export { SERVER_TOOL_CALL, SERVER_TOOL_RESULT, fetchSocket } from '@vrealtime/openai-compatible';
 export { bosonTts, type BosonTtsOptions } from './speech.js';
 export type { ProviderSocket, SocketFactory } from '@vrealtime/openai-compatible';
 
 export const BOSON_REALTIME_URL = 'wss://api.boson.ai/v1/realtime';
+
+/** Boson's built-in web search tool; its name is reserved for it. */
+export const BOSON_WEB_SEARCH = 'web_search';
+
+/**
+ * Options of Boson's built-in web search
+ * (https://docs.boson.ai/models/higgs-realtime/guides/tool-calling.md).
+ */
+export interface BosonWebSearch {
+  /** Only results from these bare hostnames (and their subdomains); at most 5. Exclusive with `excludedDomains`. */
+  allowedDomains?: readonly string[];
+  /** Never results from these bare hostnames; at most 5. */
+  excludedDomains?: readonly string[];
+  /** ISO 3166-1 alpha-2 country to bias results toward, e.g. `CN` or `US`. */
+  country?: string;
+}
 
 export interface BosonOptions {
   /** Defaults to `process.env.BOSON_API_KEY` where `process` exists. */
@@ -21,6 +37,13 @@ export interface BosonOptions {
   url?: string;
   /** Custom socket for runtimes whose `WebSocket` cannot set headers (e.g. Cloudflare Workers). */
   socket?: SocketFactory;
+  /**
+   * Boson's built-in web search, run on Boson's servers whenever the model decides
+   * it needs current or uncertain facts. Its calls never reach the app as tool calls
+   * (they surface as `server_tool.call` / `server_tool.result` extension events), and
+   * no app tool may be named `web_search`. Off by default.
+   */
+  webSearch?: boolean | BosonWebSearch;
 }
 
 const PCM = (sampleRate: 8000 | 16000 | 24000 | 48000): AudioFormat => ({ encoding: 'pcm16', sampleRate, channels: 1 });
@@ -58,11 +81,37 @@ function envKey(): string | undefined {
   return env?.['BOSON_API_KEY'];
 }
 
+const HOSTNAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+const MAX_DOMAINS = 5;
+
+/** The wire form of the web search tool; refuses what Boson would reject, before any session starts. */
+export function bosonWebSearchTool(options: true | BosonWebSearch): BuiltinTool {
+  const settings = options === true ? {} : options;
+  const invalid = (message: string): never => { throw new RealtimeError('invalid_request', `boson: webSearch ${message}`, { provider: 'boson' }); };
+  const domains = (list: readonly string[] | undefined, field: string): string[] | undefined => {
+    if (list === undefined || list.length === 0) return undefined;
+    if (list.length > MAX_DOMAINS) invalid(`${field} takes at most ${MAX_DOMAINS} domains`);
+    for (const domain of list) if (!HOSTNAME.test(domain)) invalid(`${field} needs bare hostnames without scheme or path, got "${domain}"`);
+    return [...list];
+  };
+  const allowed = domains(settings.allowedDomains, 'allowedDomains');
+  const excluded = domains(settings.excludedDomains, 'excludedDomains');
+  if (allowed && excluded) invalid('allowedDomains and excludedDomains are mutually exclusive');
+  if (settings.country !== undefined && !/^[A-Za-z]{2}$/.test(settings.country)) invalid(`country must be an ISO 3166-1 alpha-2 code, got "${settings.country}"`);
+  return {
+    type: BOSON_WEB_SEARCH,
+    ...(allowed ? { allowed_domains: allowed } : {}),
+    ...(excluded ? { excluded_domains: excluded } : {}),
+    ...(settings.country !== undefined ? { location: { country: settings.country.toUpperCase() } } : {}),
+  };
+}
+
 /** Boson Higgs Realtime (OpenAI Realtime GA compatible). */
 export function boson(options: BosonOptions = {}): RealtimeModel {
   const apiKey = options.apiKey ?? envKey();
   if (!apiKey) throw new RealtimeError('auth', 'boson: missing apiKey (or BOSON_API_KEY)', { provider: 'boson' });
   const model = options.model ?? 'higgs-realtime';
+  const builtinTools = options.webSearch ? [bosonWebSearchTool(options.webSearch)] : [];
   const defaults: SessionConfig = {
     turnDetection: options.turnDetection === undefined ? 'semantic' : options.turnDetection,
     inputTranscription: options.transcription ?? true,
@@ -83,6 +132,7 @@ export function boson(options: BosonOptions = {}): RealtimeModel {
     // Boson sends nothing on connect and acks the first `session.update` with `session.created`.
     readyOn: 'session.created',
     errors: BOSON_ERRORS,
+    ...(builtinTools.length > 0 ? { builtinTools } : {}),
     ...(options.socket ? { socket: options.socket } : {}),
   });
 }

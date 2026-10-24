@@ -1,6 +1,6 @@
 {
   "name": "@vrealtime/protocol",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "vRealTime wire protocol v1: message types, guards, binary audio frames and seq/ack helpers",
   "license": "Apache-2.0",
   "repository": {

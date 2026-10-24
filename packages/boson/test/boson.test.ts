@@ -1,7 +1,8 @@
 import type { RealtimeError, RealtimeEvent, RealtimeSession } from '@vrealtime/core';
 import { fromBase64, isRealtimeError, toBase64 } from '@vrealtime/core';
 import { describe, expect, it } from 'vitest';
-import { BOSON_REALTIME_URL, boson, type ProviderSocket } from '../src/index.js';
+import { defineAgent, startSession, type TurnMetrics } from '@vrealtime/core';
+import { BOSON_REALTIME_URL, SERVER_TOOL_CALL, SERVER_TOOL_RESULT, boson, bosonWebSearchTool, type ProviderSocket } from '../src/index.js';
 import { TRANSCRIPT_MEMORY, MAX_APPEND_BYTES } from '@vrealtime/openai-compatible';
 
 type Listener = (event: { data?: unknown; code?: number; reason?: string }) => void;
@@ -403,5 +404,103 @@ describe('provider stop reasons', () => {
     const { socket, events } = await connect();
     socket.server({ type: 'response.done', response: { id: 'r', status, status_details: { reason }, output } });
     expect(events.at(-1)).toEqual({ type: 'response.end', responseId: 'r', status: normalizedStatus, stopReason, ...(reason !== undefined ? { rawStopReason: reason } : {}) });
+  });
+});
+
+describe('boson built-in web search', () => {
+  const paint = { name: 'paint', description: 'paint it', parameters: { type: 'object' } };
+  const preamble = (id: string) => [
+    { type: 'response.created', response: { id } },
+    { type: 'response.output_audio_transcript.delta', response_id: id, item_id: `${id}-msg`, delta: 'Let me check.' },
+    { type: 'response.output_item.added', response_id: id, item: { type: 'function_call', id: `${id}-fc`, call_id: 'search_1', name: 'web_search', executor: 'server' } },
+    { type: 'response.function_call_arguments.delta', response_id: id, call_id: 'search_1', delta: '{"query":' },
+    { type: 'response.function_call_arguments.done', response_id: id, call_id: 'search_1', name: 'web_search', arguments: '{"query":"weather"}' },
+    { type: 'response.done', response: { id, status: 'completed', output: [{ type: 'message' }, { type: 'function_call', call_id: 'search_1', name: 'web_search', executor: 'server' }] } },
+  ];
+  const answer = (id: string) => [
+    { type: 'conversation.item.added', item: { type: 'function_call_output', call_id: 'search_1', output: '[results]' } },
+    { type: 'response.created', response: { id } },
+    { type: 'response.output_audio_transcript.delta', response_id: id, item_id: `${id}-msg`, delta: 'Sunny, 19 degrees.' },
+    { type: 'response.done', response: { id, status: 'completed', output: [{ type: 'message' }] } },
+  ];
+
+  it('offers web search next to the app tools, with tool_choice auto, and on its own when the app has none', async () => {
+    const withTools = await connect({ webSearch: true }, { tools: [paint] });
+    expect(withTools.socket.sent[0]!['session']).toMatchObject({
+      tools: [{ type: 'function', name: 'paint', description: 'paint it', parameters: { type: 'object' } }, { type: 'web_search' }],
+      tool_choice: 'auto',
+    });
+    const alone = await connect({ webSearch: { excludedDomains: ['spam.example'], country: 'cn' } });
+    expect(alone.socket.sent[0]!['session']).toMatchObject({ tools: [{ type: 'web_search', excluded_domains: ['spam.example'], location: { country: 'CN' } }], tool_choice: 'auto' });
+    expect((await connect({}, {})).socket.sent[0]!['session']).not.toHaveProperty('tools');
+  });
+
+  it('keeps web search in every tool update, which replaces the whole list', async () => {
+    const { socket, session, events } = await connect({ webSearch: true }, { tools: [paint] });
+    await session.update({ tools: [paint, { name: 'erase', description: 'erase', parameters: { type: 'object' } }] });
+    expect(socket.sent.at(-1)!['session'].tools.map((tool: { type: string; name?: string }) => tool.name ?? tool.type)).toEqual(['paint', 'erase', 'web_search']);
+    await session.update({ tools: [{ ...paint, name: 'web_search' }] });
+    expect(socket.sent.at(-1)!['session'].tools).toEqual([{ type: 'web_search' }]);
+    expect(events.at(-1)).toMatchObject({ type: 'error', recoverable: true, error: { code: 'invalid_request' } });
+  });
+
+  it('refuses an app tool that takes the reserved name, and options Boson would reject', async () => {
+    const opened: string[] = [];
+    const model = boson({ apiKey: 'k', webSearch: true, socket: (url) => { opened.push(url); return new MockSocket(url, {}); } });
+    await expect(model.connect({ tools: [{ ...paint, name: 'web_search' }] })).rejects.toThrow(/web_search is reserved/);
+    expect(opened).toEqual([]);
+    expect(() => bosonWebSearchTool({ allowedDomains: ['a.example'], excludedDomains: ['b.example'] })).toThrow(/mutually exclusive/);
+    expect(() => bosonWebSearchTool({ allowedDomains: ['https://a.example/path'] })).toThrow(/bare hostnames/);
+    expect(() => bosonWebSearchTool({ allowedDomains: ['a.ex', 'b.ex', 'c.ex', 'd.ex', 'e.ex', 'f.ex'] })).toThrow(/at most 5/);
+    expect(() => bosonWebSearchTool({ country: 'China' })).toThrow(/alpha-2/);
+    expect(bosonWebSearchTool({ allowedDomains: ['weather.gov', 'noaa.gov'], country: 'US' })).toEqual({ type: 'web_search', allowed_domains: ['weather.gov', 'noaa.gov'], location: { country: 'US' } });
+  });
+
+  it('never surfaces a call Boson runs itself as a tool call, and ends its response as completed', async () => {
+    const { socket, events } = await connect({ webSearch: true }, { tools: [paint] });
+    socket.sent.length = 0;
+    for (const message of [...preamble('r1'), ...answer('r2')]) socket.server(message);
+    expect(events.filter((event) => event.type === 'tool.call' || event.type === 'tool.call.delta')).toEqual([]);
+    expect(events.filter((event) => event.type === 'extension')).toEqual([
+      { type: 'extension', name: SERVER_TOOL_CALL, data: { responseId: 'r1', callId: 'search_1', name: 'web_search', arguments: { query: 'weather' } } },
+      { type: 'extension', name: SERVER_TOOL_RESULT, data: { callId: 'search_1', name: 'web_search' } },
+    ]);
+    expect(events.filter((event) => event.type === 'response.end').map((event) => event.type === 'response.end' && event.stopReason)).toEqual(['completed', 'completed']);
+    expect(socket.sent).toEqual([]);
+  });
+
+  it('still hands the app its own calls, marked executor client', async () => {
+    const { socket, events } = await connect({ webSearch: true }, { tools: [paint] });
+    socket.server({ type: 'response.output_item.added', response_id: 'r', item: { type: 'function_call', call_id: 'c1', name: 'paint', executor: 'client' } });
+    socket.server({ type: 'response.function_call_arguments.done', response_id: 'r', call_id: 'c1', name: 'paint', arguments: '{}' });
+    socket.server({ type: 'response.done', response: { id: 'r', status: 'completed', output: [{ type: 'function_call', name: 'paint', executor: 'client' }] } });
+    expect(events.filter((event) => event.type === 'tool.call')).toEqual([{ type: 'tool.call', responseId: 'r', callId: 'c1', name: 'paint', arguments: {} }]);
+    expect(events.at(-1)).toMatchObject({ type: 'response.end', stopReason: 'tool_calls' });
+  });
+
+  it('lets the runtime finish the turn on the preamble and play Boson\'s own answer, without answering the search or asking for a response', async () => {
+    let socket!: MockSocket;
+    const turns: TurnMetrics[] = [];
+    const run = (name: string) => { throw new Error(`${name} must not run`); };
+    const agent = defineAgent({
+      model: boson({ apiKey: 'k', webSearch: true, socket: (url, headers) => (socket = new MockSocket(url, headers)) }),
+      instructions: 'Search when unsure.',
+      tools: { paint: { description: 'paint it', parameters: { type: 'object' }, run: () => run('paint') } },
+      hooks: { beforeToolCall: (call) => run(call.name), onTurnEnd: (_turn, metrics) => { turns.push(metrics); } },
+    });
+    const pending = startSession(agent);
+    await Promise.resolve();
+    socket.open();
+    const session = await pending;
+    socket.server({ type: 'session.created', session: { id: 's' } });
+    session.sendText('Weather this weekend?');
+    for (const message of preamble('r1')) socket.server(message);
+    for (const message of answer('r2')) socket.server(message);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(socket.sentOf('response.create')).toHaveLength(1);
+    expect(socket.sent.filter((message) => message['item']?.type === 'function_call_output')).toEqual([]);
+    expect(turns.map((metrics) => [metrics.stopReason, metrics.toolCalls])).toEqual([['completed', 0], ['completed', 0]]);
+    expect(session.transcript.filter((item) => item.role === 'agent').map((item) => item.text)).toEqual(['Let me check.', 'Sunny, 19 degrees.']);
+    await session.close();
   });
 });
