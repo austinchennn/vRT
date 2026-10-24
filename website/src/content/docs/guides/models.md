@@ -32,6 +32,19 @@ API keys default to the environment variable shown; pass `apiKey` to set one exp
 
 Boson and OpenAI share one OpenAI-compatible implementation and differ only in endpoints, authentication and extension events. When the app's audio format is one the model accepts, audio passes through without transcoding.
 
+### Boson web search
+
+Boson can search the web on its own servers. Turn it on with `webSearch`; the model decides when to search (`tool_choice: "auto"`):
+
+```js
+boson({ webSearch: true });
+boson({ webSearch: { allowedDomains: ['weather.gov', 'noaa.gov'], country: 'US' } }); // or excludedDomains
+```
+
+Boson runs these calls itself (`executor: "server"`), so they never reach the app as tool calls and the runtime never answers them: the model speaks a short preamble, the response ends, and Boson starts a new response with the answer once the search returns. Each call surfaces as an `extension` event, `server_tool.call` with its arguments and `server_tool.result` once Boson has the result. The result's content is not passed on; Boson treats its format as unstable.
+
+`web_search` is reserved: connecting with an app tool of that name fails, and a later tool update leaves that tool out and reports a recoverable `invalid_request` error. Domains are bare hostnames, at most five, and `allowedDomains` and `excludedDomains` exclude each other; options Boson would reject throw when the model is created. See [Boson's tool guide](https://docs.boson.ai/models/higgs-realtime/guides/tool-calling.md).
+
 ## Cascade: any text model
 
 `cascade()` combines a speech-to-text model, any text LLM and a text-to-speech model into one realtime model. With `@vrealtime/ai-sdk`, the LLM can be anything the [AI SDK](https://ai-sdk.dev) supports: Claude, OpenAI, or a self-hosted OpenAI-compatible server.
